@@ -4,6 +4,7 @@ use crossbeam::channel::{unbounded, Receiver, Sender};
 use std::thread;
 
 mod service_provider;
+mod image_steganographer;
 
 use service_provider::ImageEncryptor;
 use std::fs::File;
@@ -14,10 +15,13 @@ fn main() {
     let key = ChaCha20Poly1305::generate_key(&mut OsRng);
     let encryptor = ImageEncryptor::new(key.clone(), sender);
 
-    // Load the image
-    let mut file = File::open("image.png").expect("Failed to open image file");
+    //Hide the image using steganography
+    let steganographer = image_steganographer::ImageSteganographer::new(75, 10);
+    let mut image = steganographer.hide_image("carrier.png","secret.png","output.png").unwrap();
+
+    // Load the image data
     let mut image_data = Vec::new();
-    file.read_to_end(&mut image_data).expect("Failed to read image file");
+    image.read_to_end(&mut image_data).expect("Failed to read image file");
 
     thread::spawn(move || {
         encryptor.encrypt_and_send(image_data);

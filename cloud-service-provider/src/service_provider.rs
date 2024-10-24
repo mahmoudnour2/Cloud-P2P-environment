@@ -1,5 +1,5 @@
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce}; // Or `XChaCha20Poly1305`
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use std::thread;
 
