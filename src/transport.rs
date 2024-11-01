@@ -1,128 +1,129 @@
 use crossbeam::channel::{bounded, Receiver, Select, SelectTimeoutError, Sender};
 use remote_trait_object::transport::*;
 use log::debug;
-use quinn_proto::crypto::rustls::QuicClientConfig;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime, PrivatePkcs8KeyDer};
-use tracing::{error, info};
-use url::Url;
-use quinn::{Endpoint, ClientConfig, ServerConfig};
+use quinn::{Endpoint, ClientConfig, ServerConfig, Connection, SendStream, RecvStream};
+use std::sync::Arc;
 use std::error::Error;
-use std::net::ToSocketAddrs;
-use std::fs::File;
+use tokio::runtime::Runtime;
 
+// Custom transport error types
 #[derive(Debug)]
-pub struct IntraSend(Sender<Vec<u8>>);
+pub enum QuinnTransportError {
+    ConnectionError(quinn::ConnectionError),
+    WriteError(quinn::WriteError),
+    ReadError(quinn::ReadError),
+    Custom(String),
+}
 
-impl TransportSend for IntraSend {
+impl From<quinn::ConnectionError> for QuinnTransportError {
+    fn from(err: quinn::ConnectionError) -> Self {
+        QuinnTransportError::ConnectionError(err)
+    }
+}
+
+// Modified IntraSend to use Quinn
+#[derive(Debug)]
+pub struct QuinnSend {
+    connection: Connection,
+    runtime: Arc<Runtime>,
+}
+
+
+impl TransportSend for QuinnSend {
     fn send(
         &self,
         data: &[u8],
         timeout: Option<std::time::Duration>,
     ) -> Result<(), TransportError> {
-        if let Some(timeout) = timeout {
-            // FIXME: Discern timeout error
-            self.0
-                .send_timeout(data.to_vec(), timeout)
-                .map_err(|_| TransportError::Custom)
-        } else {
-            self.0
-                .send(data.to_vec())
-                .map_err(|_| TransportError::Custom)
-        }
+        let data = data.to_vec();
+        self.runtime.block_on(async {
+            let (mut send, _recv) = self.connection.open_bi().await
+                .map_err(|e| TransportError::Custom)?;
+            
+            send.write_all(&data).await
+                .map_err(|e| TransportError::Custom)?;
+            
+            send.finish()
+                .map_err(|e| TransportError::Custom)
+        })
     }
 
     fn create_terminator(&self) -> Box<dyn Terminate> {
-        unimplemented!()
+        Box::new(QuinnTerminator(self.connection.clone()))
     }
 }
 
-pub struct IntraRecv {
-    data_receiver: Receiver<Vec<u8>>,
-    terminator_receiver: Receiver<()>,
-    terminator: Sender<()>,
+// Modified IntraRecv to use Quinn
+#[derive(Debug)]
+pub struct QuinnRecv {
+    connection: Connection,
+    runtime: Arc<Runtime>,
 }
 
-pub struct Terminator(Sender<()>);
-
-impl Terminate for Terminator {
-    fn terminate(&self) {
-        if let Err(err) = self.0.send(()) {
-            debug!("Terminate is called after receiver is closed {}", err);
-        };
-    }
-}
-
-impl TransportRecv for IntraRecv {
+impl TransportRecv for QuinnRecv {
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, TransportError> {
-        let mut selector = Select::new();
-        let data_receiver_index = selector.recv(&self.data_receiver);
-        let terminator_index = selector.recv(&self.terminator_receiver);
-
-        let selected_op = if let Some(timeout) = timeout {
-            match selector.select_timeout(timeout) {
-                Err(SelectTimeoutError) => return Err(TransportError::TimeOut),
-                Ok(op) => op,
-            }
-        } else {
-            selector.select()
-        };
-
-        let data = match selected_op.index() {
-            i if i == data_receiver_index => match selected_op.recv(&self.data_receiver) {
-                Ok(data) => data,
-                Err(_) => {
-                    debug!("Counterparty connection is closed in Intra");
-                    return Err(TransportError::Custom);
-                }
-            },
-            i if i == terminator_index => {
-                let _ = selected_op
-                    .recv(&self.terminator_receiver)
-                    .expect("Terminator should be dropped after this thread");
-                return Err(TransportError::Termination);
-            }
-            _ => unreachable!(),
-        };
-
-        Ok(data)
+        self.runtime.block_on(async {
+            let (_, mut recv) = self.connection.accept_bi().await
+                .map_err(|e| TransportError::Custom)?;
+            
+                let mut buffer = Vec::new();
+                let max_size = 30*1024 * 1024; // 30MB max size, adjust as needed
+                buffer = recv.read_to_end(max_size).await
+                    .map_err(|e| TransportError::Custom)?;
+                
+                Ok(buffer)
+        })
     }
 
     fn create_terminator(&self) -> Box<dyn Terminate> {
-        Box::new(Terminator(self.terminator.clone()))
+        Box::new(QuinnTerminator(self.connection.clone()))
     }
 }
 
+// Modified Terminator for Quinn
+pub struct QuinnTerminator(Connection);
+
+impl Terminate for QuinnTerminator {
+    fn terminate(&self) {
+        self.0.close(0u32.into(), b"terminated");
+    }
+}
+
+// Modified TransportEnds for Quinn
 pub struct TransportEnds {
-    pub send1: IntraSend,
-    pub recv1: IntraRecv,
-    pub send2: IntraSend,
-    pub recv2: IntraRecv,
+    pub send1: QuinnSend,
+    pub recv1: QuinnRecv,
+    pub send2: QuinnSend,
+    pub recv2: QuinnRecv,
 }
 
-pub fn create() -> TransportEnds {
-    let (a_sender, a_receiver) = bounded(256);
-    let (a_termination_sender, a_termination_receiver) = bounded(1);
-    let (b_sender, b_receiver) = bounded(256);
-    let (b_termination_sender, b_termination_receiver) = bounded(1);
+// Create function now establishes Quinn connections
+pub async fn create(server_endpoint: Endpoint, client_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn Error>> {
+    let runtime = Arc::new(Runtime::new()?);
+    
+    // Establish connections
+    let server_conn = server_endpoint.accept().await.unwrap().await?;
+    let client_conn = client_endpoint.connect(
+        server_endpoint.local_addr()?,
+        "localhost",
+    )?.await?;
 
-    let send1 = IntraSend(b_sender);
-    let recv1 = IntraRecv {
-        data_receiver: a_receiver,
-        terminator_receiver: a_termination_receiver,
-        terminator: a_termination_sender,
-    };
-
-    let send2 = IntraSend(a_sender);
-    let recv2 = IntraRecv {
-        data_receiver: b_receiver,
-        terminator_receiver: b_termination_receiver,
-        terminator: b_termination_sender,
-    };
-
-    TransportEnds {
-        recv1,
-        send1,
-        recv2,
-        send2,
-    }
+    Ok(TransportEnds {
+        send1: QuinnSend {
+            connection: server_conn.clone(),
+            runtime: runtime.clone(),
+        },
+        recv1: QuinnRecv {
+            connection: server_conn,
+            runtime: runtime.clone(),
+        },
+        send2: QuinnSend {
+            connection: client_conn.clone(),
+            runtime: runtime.clone(),
+        },
+        recv2: QuinnRecv {
+            connection: client_conn,
+            runtime,
+        },
+    })
 }

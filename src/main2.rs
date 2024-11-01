@@ -7,7 +7,6 @@ use std::sync::Arc;
 mod transport;
 mod image_steganographer;
 mod quinn_utils;
-mod main2;
 use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
 use transport::{create, TransportEnds};
 use quinn_utils::*;
@@ -33,15 +32,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let transport_ends = create(server_endpoint, client_endpoint).await?;
 
     // Create RTO context
-    let _context_steganographer = Context::with_initial_service_export(
-        Config::default_setup(),
-        transport_ends.send1,
-        transport_ends.recv1,
-        ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
-    );
-    
-    // Create and register the steganographer service
-    let steganographer = SomeImageSteganographer::new(90, 10);
+    let (_context_user, image_steganographer): (_, ServiceToImport<dyn ImageSteganographer>) =
+        Context::with_initial_service_import(Config::default_setup(), send2, recv2);
+    let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
+
+    // Test the encode method
+    image_steganographer_proxy.encode(secret_path.clone(), carrier_path.clone(), output_path1.clone()).unwrap();
+    println!("Encode method invoked successfully.");
 
 
     // Keep the server running
