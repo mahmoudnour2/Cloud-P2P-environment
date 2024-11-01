@@ -121,28 +121,10 @@ pub fn make_client_endpoint(
     bind_addr: SocketAddr,
     server_certs: &[&[u8]],
 ) -> Result<Endpoint, Box<dyn Error + Send + Sync + 'static>> {
-    let client_cfg = configure_client(s#[derive(Debug)]
-    struct SkipServerVerification(Arc<rustls::crypto::CryptoProvider>);
-    
-    impl SkipServerVerification {
-        fn new() -> Arc<Self> {
-            Arc::new(Self(Arc::new(rustls::crypto::ring::default_provider())))
-        }
-    }
-    
-    impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
-        fn verify_server_cert(
-            &self,
-            _end_entity: &CertificateDer<'_>,
-            _intermediates: &[CertificateDer<'_>],
-            _server_name: &ServerName<'_>,
-            _ocsp: &[u8],
-            _now: UnixTime,
-        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::danger::ServerCertVerified::assertion())
-        }
-    
-        fn verify_tls12_sign
+    let client_cfg = configure_client(server_certs)?;
+    let mut endpoint = Endpoint::client(bind_addr)?;
+    endpoint.set_default_client_config(client_cfg);
+    Ok(endpoint)
 }
 
 /// Constructs a QUIC endpoint configured to listen for incoming connections on a certain address
