@@ -13,7 +13,7 @@ use image;
 use transport::{create, TransportEnds};
 use quinn_utils::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
-use cloud_leader_election::{State, VoteReason, SystemMetrics, QuinnNode};
+use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
@@ -47,14 +47,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     */
 
     // Setup Quinn endpoints
-    let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;  // Connect to server's port
+    let server_addr: SocketAddr = "10.7.16.71:5000".parse()?;  // Connect to server's port
     let client_addresses: Vec<SocketAddr> = vec![
-        "127.0.0.1:4801".parse()?,
-        "127.0.0.1:4802".parse()?,
+        "10.7.19.137:5000".parse()?,
     ];
     println!("Quinn endpoints setup beginning.");
-    let mut quinn_node = QuinnNode::new(5,server_addr,client_addresses).await?;
-    quinn_node.run().await?;
+    let mut quinn_node = Node::new(5,server_addr,client_addresses).await?;
+    quinn_node.run().await;
     println!("Quinn endpoints setup successfully.");
     // Keep the server running
     tokio::signal::ctrl_c().await?;

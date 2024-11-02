@@ -1,5 +1,5 @@
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, sleep, timeout};
 use std::collections::HashMap;
 use rand::Rng;
 use std::time::Instant;
@@ -69,26 +69,56 @@ pub struct Node {
     negative_votes_received: HashMap<u64, VoteReason>,
     candidates: Vec<Candidate>,
     current_leader_id: Option<u64>,
-    node_channels: HashMap<u64, mpsc::Sender<NodeMessage>>,
-    rx: mpsc::Receiver<NodeMessage>,
+    server_addr: SocketAddr,
+    peer_addrs: Vec<SocketAddr>,
+    server_endpoint: Endpoint,
+    client_endpoints: Vec<(SocketAddr, Endpoint)>,
 }
 
 impl Node {
-    pub fn new(id: u64, channels: HashMap<u64, mpsc::Sender<NodeMessage>>, rx: mpsc::Receiver<NodeMessage>) -> Self {
-        let mut node = Self {
+    pub async fn new(id: u64,
+        server_addr: SocketAddr,
+        peer_addrs: Vec<SocketAddr>,) 
+        -> Result<Self> {
+        
+        //node.metrics = node.collect_metrics(); // Collect actual metrics
+
+        let peer_addrs_clone = peer_addrs.clone();
+        // Setup server endpoint
+        println!("Setting up server endpoint on {}", server_addr);
+        let (server_endpoint, _cert) = make_server_endpoint(server_addr).map_err(|e| anyhow::anyhow!(e))?;
+        
+        // Setup client endpoints
+        println!("Setting up client endpoints for {} peers", peer_addrs.len());
+        let mut client_endpoints = Vec::new();
+        for peer_addr in peer_addrs {
+            let mut client_endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
+            client_endpoint.set_default_client_config(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+                rustls::ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(SkipServerVerification::new())
+                    .with_no_client_auth(),
+            )?)));
+            client_endpoints.push((peer_addr, client_endpoint));
+        }
+
+        let mut node = Node {
             id,
             state: State::Follower,
-            metrics: SystemMetrics::default(), // Temporary default, will be updated
+            metrics: SystemMetrics::default(),
             last_heartbeat: Instant::now(),
             heartbeat_timeout: Duration::from_secs(5),
             negative_votes_received: HashMap::new(),
             candidates: Vec::new(),
             current_leader_id: None,
-            node_channels: channels,
-            rx,
+            server_addr,
+            peer_addrs: peer_addrs_clone,
+            server_endpoint,
+            client_endpoints,
         };
         node.metrics = node.collect_metrics(); // Collect actual metrics
-        node
+
+        Ok(node)
     }
 
     pub async fn run(&mut self) {
@@ -109,26 +139,43 @@ impl Node {
             self.metrics = new_metrics;
             self.broadcast_heartbeat().await;
 
-            while let Ok(msg) = self.rx.try_recv() {
-                match msg {
-                    NodeMessage::NegativeVote { voter_id, reason, metrics } => {
-                        println!("Leader received negative vote from Node {} due to {:?}", voter_id, reason);
-                        self.negative_votes_received.insert(voter_id, reason.clone());
-                        self.update_candidate(voter_id, metrics);
-                        
-                        println!("Current negative votes: {}", self.negative_votes_received.len());
-                        if self.negative_votes_received.len() >= 2 {
-                            println!("Received enough negative votes, stepping down");
-                            self.state = State::DefactoLeader;
-                            return;
+            // Accept incoming connections and messages with a timeout
+            match timeout(Duration::from_secs(1), self.server_endpoint.accept()).await {
+                Ok(Some(incoming)) => {
+                    if let Ok(conn) = incoming.await {
+                        if let Ok((send, mut recv)) = conn.accept_bi().await {
+                            if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
+                                if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
+                                    match msg {
+                                        NodeMessage::NegativeVote { voter_id, reason, metrics } => {
+                                            println!("Leader received negative vote from Node {} due to {:?}", voter_id, reason);
+                                            self.negative_votes_received.insert(voter_id, reason.clone());
+                                            self.update_candidate(voter_id, metrics);
+                                            
+                                            if self.negative_votes_received.len() >= 2 {
+                                                println!("Received enough negative votes, stepping down");
+                                                self.state = State::DefactoLeader;
+                                                return;
+                                            }
+                                        }
+                                        NodeMessage::UpdateMetrics(new_metrics) => {
+                                            self.metrics = new_metrics;
+                                            println!("Updated leader metrics: CPU: {:.1}%, Memory: {:.1}%", 
+                                                self.metrics.cpu_load, self.metrics.memory_usage);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
                         }
                     }
-                    NodeMessage::UpdateMetrics(new_metrics) => {
-                        self.metrics = new_metrics;
-                        println!("Updated leader metrics: CPU: {:.1}%, Memory: {:.1}%", 
-                            self.metrics.cpu_load, self.metrics.memory_usage);
-                    }
-                    _ => {}
+                }
+                Ok(None) => {
+                    // No incoming connection within the timeout duration
+                }
+                Err(_) => {
+                    // Timeout occurred
+                    println!("Leader timed out waiting for boradcasting heartbeat");
                 }
             }
 
@@ -144,27 +191,51 @@ impl Node {
                 return;
             }
 
-            while let Ok(msg) = self.rx.try_recv() {
-                match msg {
-                    NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
-                        println!("Node {} received heartbeat from leader {}", self.id, leader_id);
-                        self.last_heartbeat = Instant::now();
-                        self.current_leader_id = Some(leader_id);
-                        self.candidates = candidates;
-                        
-                        if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
-                            self.send_negative_vote(leader_id, reason).await;
+            // Accept incoming connections and messages with a timeout
+            match timeout(Duration::from_secs(1), self.server_endpoint.accept()).await {
+                Ok(Some(incoming)) => {
+                    if let Ok(conn) = incoming.await {
+                        if let Ok((send, mut recv)) = conn.accept_bi().await {
+                            if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
+                                if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
+                                    match msg {
+                                        NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
+                                            println!("Node {} received heartbeat from leader {}", self.id, leader_id);
+                                            self.last_heartbeat = Instant::now();
+                                            self.current_leader_id = Some(leader_id);
+                                            self.candidates = candidates;
+                                            
+                                            if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
+                                                // Call broadcast_message instead of send_negative_vote
+                                                let vote_msg = NodeMessage::NegativeVote {
+                                                    voter_id: self.id,
+                                                    reason,
+                                                    metrics: self.collect_metrics(),
+                                                };
+                                                let _ = self.broadcast_message(vote_msg).await;
+                                            }
+                                        }
+                                        NodeMessage::ElectionResult { new_leader_id } => {
+                                            if new_leader_id == self.id {
+                                                self.state = State::Leader;
+                                                return;
+                                            } else {
+                                                self.current_leader_id = Some(new_leader_id);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
                         }
                     }
-                    NodeMessage::ElectionResult { new_leader_id } => {
-                        if new_leader_id == self.id {
-                            self.state = State::Leader;
-                            return;
-                        } else {
-                            self.current_leader_id = Some(new_leader_id);
-                        }
-                    }
-                    _ => {}
+                }
+                Ok(None) => {
+                    // No incoming connection within the timeout duration
+                }
+                Err(_) => {
+                    // Timeout occurred
+                    println!("Node {} timed out waiting for heartbeat", self.id);
                 }
             }
 
@@ -287,29 +358,35 @@ impl Node {
 
     async fn send_negative_vote(&mut self, leader_id: u64, reason: VoteReason) {
         let current_metrics = self.collect_metrics();
-        
-        if let Some(leader_tx) = self.node_channels.get(&leader_id) {
-            if let Err(e) = leader_tx.send(NodeMessage::NegativeVote { 
-                voter_id: self.id,
-                reason,
-                metrics: current_metrics,
-            }).await {
-                println!("Failed to send negative vote to leader {}: {}", leader_id, e);
-            }
+        let vote_msg = NodeMessage::NegativeVote { 
+            voter_id: self.id,
+            reason,
+            metrics: current_metrics,
+        };
+        if let Err(e) = self.broadcast_message(vote_msg).await {
+            println!("Failed to send negative vote to leader {}: {}", leader_id, e);
         }
     }
 
-    async fn broadcast_message(&self, msg: NodeMessage) {
-        println!("Broadcasting message to {} nodes", self.node_channels.len());
-        for (&node_id, tx) in &self.node_channels {
-            if node_id != self.id {
-                if let Err(e) = tx.send(msg.clone()).await {
-                    println!("Failed to send message to node {}: {}", node_id, e);
-                } else {
-                    println!("Successfully sent message to node {}", node_id);
-                }
+    async fn broadcast_message(&self, msg: NodeMessage) -> Result<()> {
+        let msg_bytes = bincode::serialize(&msg)?;
+
+        for (peer_addr, client_endpoint) in &self.client_endpoints {
+            
+
+            let conn = client_endpoint.connect(
+                *peer_addr,
+                "localhost",
+            ).map_err(|e| anyhow::anyhow!("{}", e))?
+            .await.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            if let Ok((mut send, _recv)) = conn.open_bi().await {
+                println!("Sending message to {}", peer_addr);
+                let _ = send.write_all(&msg_bytes); 
+                let _ = send.finish();
             }
         }
+        Ok(())
     }
 
     fn update_candidate(&mut self, candidate_id: u64, metrics: SystemMetrics) {
@@ -329,7 +406,8 @@ impl Node {
             println!("Added new candidate {} to election pool", candidate_id);
         }
     }
-}
+
+    }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Candidate {
@@ -338,6 +416,7 @@ pub struct Candidate {
     pub score: f64,
 }
 
+/*
 pub struct QuinnNode {
     node: Node,
     server_endpoint: Endpoint,
@@ -448,6 +527,7 @@ impl QuinnNode {
             .await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
             if let Ok((mut send, _recv)) = conn.open_bi().await {
+                println!("Sending message to {}", peer_addr);
                 let _ = send.write_all(&msg_bytes); 
                 let _ = send.finish();
             }
@@ -455,3 +535,4 @@ impl QuinnNode {
         Ok(())
     }
 }
+*/
