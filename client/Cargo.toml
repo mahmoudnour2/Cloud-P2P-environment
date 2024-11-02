@@ -1,0 +1,33 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+quinn = "0.11.5" 
+quinn-proto = "0.11.5"
+tokio = { version = "1.28.1", features = ["full"] }
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+rcgen = "0.13"
+anyhow = "1.0.22"
+clap = { version = "4", features = ["derive"] }
+tracing = { version = "0.1.10", default-features = false, features = ["std"] }
+tracing-futures = { version = "0.2.0", default-features = false, features = ["std-future"] }
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+url = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+steganography = "1.0.2"
+image = "0.21.3"
+remote-trait-object = "0.5.0"
+parking_lot = "0.12.3"
+linkme = "0.2.3"
+once_cell = "1.20.2"
+log = "0.4.22"
+hex = "0.4.3"
+env_logger = "0.11.5"
+bincode = "1.3.3"
+remote-trait-object-macro = "0.4.1"
+crossbeam = "0.8.4"
+smol = "2.0.2"
+futures = "0.3.31"
