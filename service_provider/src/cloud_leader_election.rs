@@ -398,10 +398,14 @@ impl QuinnNode {
         server_addr: SocketAddr,
         peer_addrs: Vec<SocketAddr>,
     ) -> Result<Self> {
+
+        let peer_addrs_clone = peer_addrs.clone();
         // Setup server endpoint
+        println!("Setting up server endpoint on {}", server_addr);
         let (server_endpoint, _cert) = make_server_endpoint(server_addr).map_err(|e| anyhow::anyhow!(e))?;
         
         // Setup client endpoints
+        println!("Setting up client endpoints for {} peers", peer_addrs.len());
         let mut client_endpoints = Vec::new();
         for peer_addr in peer_addrs {
             let mut client_endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
@@ -417,12 +421,14 @@ impl QuinnNode {
         // Setup channels
         let (tx, rx) = mpsc::channel(100);
         let mut node_channels = HashMap::new();
-        for i in 0..3 {
+        
+        for (i, peer_addr) in peer_addrs_clone.iter().enumerate() {
             let (node_tx, _) = mpsc::channel(100);
             node_channels.insert(i as u64, node_tx);
         }
 
         let node = Node::new(node_id, node_channels, rx);
+        println!("QuinnNode setup complete");
 
         Ok(Self {
             node,
@@ -434,11 +440,13 @@ impl QuinnNode {
     pub async fn run(&mut self) -> Result<()> {
         // Spawn server handler
         let server_endpoint = self.server_endpoint.clone();
-        let tx = self.node.node_channels.get(&self.node.id).unwrap().clone();
-        
-        tokio::spawn(async move {
-            Self::handle_server(server_endpoint, tx).await;
-        });
+        let tx = self.node.node_channels.get(&self.node.id);
+        if let Some(tx) = tx {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                Self::handle_server(server_endpoint, tx).await;
+            });
+        }
 
         // Run the election node
         self.node.run().await;
@@ -446,6 +454,7 @@ impl QuinnNode {
     }
 
     async fn handle_server(endpoint: Endpoint, tx: mpsc::Sender<NodeMessage>) {
+        println!("Server listening on {}", endpoint.local_addr().unwrap());
         while let Some(conn) = endpoint.accept().await {
             let conn = match conn.await {
                 Ok(conn) => conn,

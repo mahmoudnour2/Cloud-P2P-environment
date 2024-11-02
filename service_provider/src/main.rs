@@ -17,6 +17,7 @@ use cloud_leader_election::{State, VoteReason, SystemMetrics, QuinnNode};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
+    /*
     // Setup Quinn endpoints
     let server_addr: SocketAddr = "10.7.16.71:5000".parse()?;  // Connect to server's port
     let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
@@ -43,8 +44,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Create and register the steganographer service
     let steganographer = SomeImageSteganographer::new(90, 10);
+    */
 
-
+    // Setup Quinn endpoints
+    let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;  // Connect to server's port
+    let client_addresses: Vec<SocketAddr> = vec![
+        "127.0.0.1:4801".parse()?,
+        "127.0.0.1:4802".parse()?,
+    ];
+    println!("Quinn endpoints setup beginning.");
+    let mut quinn_node = QuinnNode::new(5,server_addr,client_addresses).await?;
+    quinn_node.run().await?;
+    println!("Quinn endpoints setup successfully.");
     // Keep the server running
     tokio::signal::ctrl_c().await?;
     println!("Shutting down server...");
