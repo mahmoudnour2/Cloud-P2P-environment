@@ -16,8 +16,8 @@ use quinn_proto::crypto::rustls::QuicClientConfig;
 async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
-    let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;  // Connect to server's port
-    let client_addr: SocketAddr = "127.0.0.1:4800".parse()?;  // Listen on this port
+    let server_addr: SocketAddr = "10.7.16.71:5000".parse()?;  // Connect to server's port
+    let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 

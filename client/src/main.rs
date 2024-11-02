@@ -59,8 +59,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Secret image loaded successfully.");
 
-    image_steganographer_proxy.encode(secret_image_bytes, "/home/magdeldin@auc.egy/stego.png").unwrap();
+    let stegano = image_steganographer_proxy.encode(secret_image_bytes, "/home/magdeldin@auc.egy/stego.png").unwrap();
     println!("Encode method invoked successfully.");
+
+    // Test the decode method
+    let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
+    let finale = local_steganogragrapher.decode(&stegano,"/home/magdeldin@auc.egy/finale.png").unwrap();
+    println!("Decode method invoked successfully.");
+
 
 
     // Keep the server running
