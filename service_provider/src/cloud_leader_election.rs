@@ -1,3 +1,4 @@
+use rustls::pki_types::CertificateDer;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep, timeout};
 use std::collections::HashMap;
@@ -70,8 +71,9 @@ pub struct Node {
     negative_votes_received: HashMap<u64, VoteReason>,
     candidates: Vec<Candidate>,
     current_leader_id: Option<u64>,
-    server_endpoint: Endpoint,
-    client_endpoints: Vec<(SocketAddr, Endpoint)>,
+    pub server_endpoint: Endpoint,
+    pub _cert: CertificateDer<'static>, 
+    pub client_endpoints: Vec<(SocketAddr, Endpoint)>,
 }
 
 impl Node {
@@ -89,19 +91,22 @@ impl Node {
         println!("Setting up client endpoints for {} peers", peer_addrs.len());
         let mut client_endpoints = Vec::new();
         for peer_addr in peer_addrs {
+            println!("Setting up client endpoint for peer {}", peer_addr);
             let mut client_endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
+            println!("Client endpoint created for peer {}", peer_addr);
             client_endpoint.set_default_client_config(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
                 rustls::ClientConfig::builder()
                     .dangerous()
                     .with_custom_certificate_verifier(SkipServerVerification::new())
                     .with_no_client_auth(),
             )?)));
+            println!("Client config set for peer {}", peer_addr);
             client_endpoints.push((peer_addr, client_endpoint));
         }
 
         let mut node = Node {
             id,
-            state: State::Follower,
+            state: State::Leader,
             metrics: SystemMetrics::default(),
             last_heartbeat: Instant::now(),
             heartbeat_timeout: Duration::from_secs(5),
@@ -109,6 +114,7 @@ impl Node {
             candidates: Vec::new(),
             current_leader_id: None,
             server_endpoint,
+            _cert,
             client_endpoints,
         };
         node.metrics = node.collect_metrics(); // Collect actual metrics
@@ -336,7 +342,7 @@ impl Node {
         None
     }
 
-    async fn broadcast_heartbeat(&self) {
+    pub async fn broadcast_heartbeat(&self) {
         println!("Node {} broadcasting heartbeat", self.id);
         self.broadcast_message(NodeMessage::Heartbeat {
             leader_id: self.id,
