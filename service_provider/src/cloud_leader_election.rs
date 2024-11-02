@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::error::Error;
 use anyhow::Result;
 use std::sync::Arc;
+use sysinfo::{System};
 use crate::quinn_utils::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,18 +26,12 @@ pub enum State {
 pub enum VoteReason {
     HighCPULoad,
     HighMemoryUsage,
-    NetworkCongestion,
-    HighLatency
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
     pub cpu_load: f64,
     pub memory_usage: f64,
-    pub network_bandwidth: f64,
-    pub disk_io: f64,
-    pub request_latency: f64,
-    pub connection_count_for_node: u32,
 }
 
 impl Default for SystemMetrics {
@@ -44,10 +39,6 @@ impl Default for SystemMetrics {
         Self {
             cpu_load: 50.0,
             memory_usage: 60.0,
-            network_bandwidth: 500.0,
-            disk_io: 200.0,
-            request_latency: 10.0,
-            connection_count_for_node: 50,
         }
     }
 }
@@ -84,10 +75,10 @@ pub struct Node {
 
 impl Node {
     pub fn new(id: u64, channels: HashMap<u64, mpsc::Sender<NodeMessage>>, rx: mpsc::Receiver<NodeMessage>) -> Self {
-        Self {
+        let mut node = Self {
             id,
             state: State::Follower,
-            metrics: SystemMetrics::default(),
+            metrics: SystemMetrics::default(), // Temporary default, will be updated
             last_heartbeat: Instant::now(),
             heartbeat_timeout: Duration::from_secs(5),
             negative_votes_received: HashMap::new(),
@@ -95,7 +86,9 @@ impl Node {
             current_leader_id: None,
             node_channels: channels,
             rx,
-        }
+        };
+        node.metrics = node.collect_metrics(); // Collect actual metrics
+        node
     }
 
     pub async fn run(&mut self) {
@@ -186,13 +179,11 @@ impl Node {
         self.update_candidate(self.id, self_metrics.clone());
         
        if let Some(new_leader_id) = self.elect_leader(&self.candidates) {
-            println!("👑 Node {} elected as new leader\n   New Leader Metrics:\n   CPU: {:.1}%\n   Memory: {:.1}%\n   Network: {:.1} Mbps\n   Latency: {:.1}ms\n   Connections: {}", 
+            println!("👑 Node {} elected as new leader\n   New Leader Metrics:\n   CPU: {:.1}%\n   Memory: {:.1}%\n", 
                 new_leader_id,
                 self_metrics.cpu_load,
                 self_metrics.memory_usage,
-                self_metrics.network_bandwidth,
-                self_metrics.request_latency,
-                self_metrics.connection_count_for_node
+    
             );
              
             // Broadcast result
@@ -225,57 +216,36 @@ impl Node {
         SystemMetrics {
             cpu_load: self.measure_cpu_load(),
             memory_usage: self.measure_memory_usage(),
-            network_bandwidth: self.measure_network_bandwidth(),
-            disk_io: self.measure_disk_io(),
-            request_latency: self.measure_request_latency(),
-            connection_count_for_node: self.get_connection_count_for_node(),
         }
     }
-
     fn measure_cpu_load(&self) -> f64 {
-        // TODO: Implement actual CPU measurement
-        50.0 // Default placeholder value
+        let mut system = System::new_all();
+        system.refresh_all();
+        let cpu_load = system.global_cpu_usage();
+        cpu_load as f64
     }
 
     fn measure_memory_usage(&self) -> f64 {
-        // TODO: Implement actual memory measurement
-        60.0 // Default placeholder value
+        let mut system = System::new_all();
+        system.refresh_all();
+        let total_memory = system.total_memory();
+        let used_memory = system.total_memory() - system.available_memory();
+        (used_memory as f64 / total_memory as f64) * 100.0
     }
 
-    fn measure_network_bandwidth(&self) -> f64 {
-        // TODO: Implement actual network bandwidth measurement
-        500.0 // Default placeholder value (Mbps)
-    }
-
-    fn measure_disk_io(&self) -> f64 {
-        // TODO: Implement actual disk I/O measurement
-        200.0 // Default placeholder value (IOPS)
-    }
-
-    fn measure_request_latency(&self) -> f64 {
-        // TODO: Implement actual latency measurement
-        10.0 // Default placeholder value (ms)
-    }
-
-    fn get_connection_count_for_node(&self) -> u32 {
-        // TODO: Implement actual connection counting
-        50 // Default placeholder value
-    }
 
     fn calculate_score(&self, metrics: &SystemMetrics) -> f64 {
-        const CPU_WEIGHT: f64 = 0.3;
-        const MEMORY_WEIGHT: f64 = 0.2;
-        const NETWORK_WEIGHT: f64 = 0.2;
-        const LATENCY_WEIGHT: f64 = 0.2;
-        const CONNECTIONS_WEIGHT: f64 = 0.1;
+        const CPU_WEIGHT: f64 = 0.6;
+        const MEMORY_WEIGHT: f64 = 0.4;
+
+   
 
         let cpu_score = 1.0 - (metrics.cpu_load / 100.0);
         let memory_score = 1.0 - (metrics.memory_usage / 100.0);
-        let network_score = metrics.network_bandwidth / 1000.0;
-        let latency_score = 1.0 / metrics.request_latency;
-        let connections_score = 1.0 - (metrics.connection_count_for_node as f64 / 1000.0);
 
-        let base_score = cpu_score * CPU_WEIGHT + memory_score * MEMORY_WEIGHT + network_score * NETWORK_WEIGHT + latency_score * LATENCY_WEIGHT + connections_score * CONNECTIONS_WEIGHT;
+       
+
+        let base_score = cpu_score * CPU_WEIGHT + memory_score * MEMORY_WEIGHT;
 
         // Add ±2% randomization for non-prejudiced selection
         base_score * (0.98 + rand::thread_rng().gen::<f64>() * 0.04)
@@ -285,42 +255,24 @@ impl Node {
         let my_metrics = &self.metrics;
 
         if my_metrics.cpu_load < leader_metrics.cpu_load * 0.7 {
-            println!("🗳️ Node {} casting negative vote due to HighCPULoad\n   Node Metrics vs Leader Metrics:\n   CPU: {:.1}% vs {:.1}%\n   Memory: {:.1}% vs {:.1}%\n   Network: {:.1} vs {:.1} Mbps", 
+            println!("🗳️ Node {} casting negative vote due to HighCPULoad\n   Node Metrics vs Leader Metrics:\n   CPU: {:.1}% vs {:.1}%\n   Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
                 my_metrics.memory_usage, leader_metrics.memory_usage,
-                my_metrics.network_bandwidth, leader_metrics.network_bandwidth
+            
             );
             return Some(VoteReason::HighCPULoad);
         }
         if my_metrics.memory_usage < leader_metrics.memory_usage * 0.7 {
-            println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n   Node Metrics vs Leader Metrics:\n   CPU: {:.1}% vs {:.1}%\n   Memory: {:.1}% vs {:.1}%\n   Network: {:.1} vs {:.1} Mbps", 
+            println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n   Node Metrics vs Leader Metrics:\n   CPU: {:.1}% vs {:.1}%\n   Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
                 my_metrics.memory_usage, leader_metrics.memory_usage,
-                my_metrics.network_bandwidth, leader_metrics.network_bandwidth
+    
             );
             return Some(VoteReason::HighMemoryUsage);
         }
-        if my_metrics.network_bandwidth > leader_metrics.network_bandwidth * 1.5 {
-            println!("🗳️ Node {} casting negative vote due to NetworkCongestion\n   Node Metrics vs Leader Metrics:\n   CPU: {:.1}% vs {:.1}%\n   Memory: {:.1}% vs {:.1}%\n   Network: {:.1} vs {:.1} Mbps", 
-                self.id, 
-                my_metrics.cpu_load, leader_metrics.cpu_load,
-                my_metrics.memory_usage, leader_metrics.memory_usage,
-                my_metrics.network_bandwidth, leader_metrics.network_bandwidth
-            );
-            return Some(VoteReason::NetworkCongestion);
-        }
-        if my_metrics.request_latency < leader_metrics.request_latency * 0.5 {
-            println!("🗳️ Node {} casting negative vote due to HighLatency\n   Node Metrics vs Leader Metrics:\n   CPU: {:.1}% vs {:.1}%\n   Memory: {:.1}% vs {:.1}%\n   Network: {:.1} vs {:.1} Mbps", 
-                self.id, 
-                my_metrics.cpu_load, leader_metrics.cpu_load,
-                my_metrics.memory_usage, leader_metrics.memory_usage,
-                my_metrics.network_bandwidth, leader_metrics.network_bandwidth
-            );
-            return Some(VoteReason::HighLatency);
-        }
-
+        
         None
     }
 
