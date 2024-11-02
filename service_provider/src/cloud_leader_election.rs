@@ -14,6 +14,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use sysinfo::{System};
 use crate::quinn_utils::*;
+use std::future::Future;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
@@ -69,8 +70,6 @@ pub struct Node {
     negative_votes_received: HashMap<u64, VoteReason>,
     candidates: Vec<Candidate>,
     current_leader_id: Option<u64>,
-    server_addr: SocketAddr,
-    peer_addrs: Vec<SocketAddr>,
     server_endpoint: Endpoint,
     client_endpoints: Vec<(SocketAddr, Endpoint)>,
 }
@@ -82,8 +81,6 @@ impl Node {
         -> Result<Self> {
         
         //node.metrics = node.collect_metrics(); // Collect actual metrics
-
-        let peer_addrs_clone = peer_addrs.clone();
         // Setup server endpoint
         println!("Setting up server endpoint on {}", server_addr);
         let (server_endpoint, _cert) = make_server_endpoint(server_addr).map_err(|e| anyhow::anyhow!(e))?;
@@ -111,8 +108,6 @@ impl Node {
             negative_votes_received: HashMap::new(),
             candidates: Vec::new(),
             current_leader_id: None,
-            server_addr,
-            peer_addrs: peer_addrs_clone,
             server_endpoint,
             client_endpoints,
         };
@@ -206,13 +201,7 @@ impl Node {
                                             self.candidates = candidates;
                                             
                                             if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
-                                                // Call broadcast_message instead of send_negative_vote
-                                                let vote_msg = NodeMessage::NegativeVote {
-                                                    voter_id: self.id,
-                                                    reason,
-                                                    metrics: self.collect_metrics(),
-                                                };
-                                                let _ = self.broadcast_message(vote_msg).await;
+                                                self.send_negative_vote(leader_id, reason).await;
                                             }
                                         }
                                         NodeMessage::ElectionResult { new_leader_id } => {
@@ -260,7 +249,7 @@ impl Node {
             // Broadcast result
             self.broadcast_message(NodeMessage::ElectionResult { 
                 new_leader_id 
-            }).await;
+            }).await.unwrap();
 
             // Update own state
             self.state = if new_leader_id == self.id {
@@ -353,7 +342,7 @@ impl Node {
             leader_id: self.id,
             metrics: self.metrics.clone(),
             candidates: self.candidates.clone(),
-        }).await;
+        }).await.unwrap();
     }
 
     async fn send_negative_vote(&mut self, leader_id: u64, reason: VoteReason) {
@@ -369,22 +358,48 @@ impl Node {
     }
 
     async fn broadcast_message(&self, msg: NodeMessage) -> Result<()> {
+        println!("Node {} broadcasting message", self.id);
         let msg_bytes = bincode::serialize(&msg)?;
 
+        let msg_bytes = bincode::serialize(&msg).expect("Failed to serialize message");
+
+        let mut tasks = vec![];
+
         for (peer_addr, client_endpoint) in &self.client_endpoints {
+            let msg_bytes = msg_bytes.clone();
+            let client_endpoint = client_endpoint.clone();
+            let peer_addr = *peer_addr;
+
+            let task = tokio::task::spawn(async move {
+                println!("Establishing connection to {}", peer_addr);
+                
+                let result: Result<(), anyhow::Error> = async {
+                    let conn = client_endpoint.connect(
+                        peer_addr,
+                        "localhost",
+                    ).map_err(|e| anyhow::anyhow!("{}", e))?
+                    .await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        
+                    if let Ok((mut send, _recv)) = conn.open_bi().await {
+                        println!("Sending message to {}", peer_addr);
+                        let _ = send.write_all(&msg_bytes); 
+                        let _ = send.finish();
+                    }
+                    Ok(())
+                }.await;
+                
+                if let Err(e) = result {
+                    println!("Error sending message to {}: {}", peer_addr, e);
+                }
+            });
+
+            tasks.push(task);
             
+        }
 
-            let conn = client_endpoint.connect(
-                *peer_addr,
-                "localhost",
-            ).map_err(|e| anyhow::anyhow!("{}", e))?
-            .await.map_err(|e| anyhow::anyhow!("{}", e))?;
-
-            if let Ok((mut send, _recv)) = conn.open_bi().await {
-                println!("Sending message to {}", peer_addr);
-                let _ = send.write_all(&msg_bytes); 
-                let _ = send.finish();
-            }
+        // Wait for all tasks to complete
+        for task in tasks {
+            let _ = task.await;
         }
         Ok(())
     }
