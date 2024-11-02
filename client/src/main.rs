@@ -16,7 +16,11 @@ use image;
 async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
-    let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;  // Connect to server's port
+    let server_addrs: Vec<SocketAddr> = vec![
+        "10.7.16.71:5000".parse()?,
+        "10.7.16.71:5001".parse()?,
+        "10.7.16.71:5002".parse()?
+    ];  // Connect to server's ports
     let client_addr: SocketAddr = "127.0.0.1:4800".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
@@ -36,36 +40,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Quinn endpoints setup successfully.");
     // Create transport ends
     println!("Creating transport ends.");
-    let transport_ends = create(client_endpoint, server_addr).await?;
+    let mut transport_ends_vec = Vec::new();
+    for address in server_addrs {
+        let ends = create(client_endpoint.clone(),address).await?;
+        transport_ends_vec.push(ends);
+    }
     println!("Transport ends created successfully.");
 
-    // Create RTO context
-    println!("Creating RTO context.");
-    let (_context_user, image_steganographer): (_, ServiceToImport<dyn ImageSteganographer>) =
-        Context::with_initial_service_import(Config::default_setup(), transport_ends.send, transport_ends.recv);
-    let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-    println!("RTO context created successfully.");
-    // Test the encode method
+    
+    // Process each transport end
+    for (index, transport_end) in transport_ends_vec.iter().enumerate() {
+        println!("Processing transport end {}", index);
+        
+        // Create RTO context
+        println!("Creating RTO context for endpoint {}", index);
+        let (_context_user, image_steganographer): (_, ServiceToImport<dyn ImageSteganographer>) =
+            Context::with_initial_service_import(Config::default_setup(), transport_end.send.clone(), transport_end.recv.clone());
+        let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
+        println!("RTO context created successfully for endpoint {}", index);
 
-    // load the secret image
-    let secret_image = tokio::task::spawn_blocking(move || {
-        let img = image::open("/home/magdeldin@auc.egy/Cloud-P2P-environment/client/secret.jpg").unwrap();
-        let mut buffer = Vec::new();
-        img.write_to(&mut buffer, image::ImageFormat::PNG).unwrap();
-        buffer
-    }).await?;
-    // Convert the secret image buffer to a byte slice
-    let secret_image_bytes: &[u8] = &secret_image;
+        // Load the secret image
+        let secret_image = tokio::task::spawn_blocking(move || {
+            let img = image::open("/home/magdeldin@auc.egy/Cloud-P2P-environment/client/secret.jpg").unwrap();
+            let mut buffer = Vec::new();
+            img.write_to(&mut buffer, image::ImageFormat::PNG).unwrap();
+            buffer
+        }).await?;
+        let secret_image_bytes: &[u8] = &secret_image;
+        println!("Secret image loaded successfully for endpoint {}", index);
 
-    println!("Secret image loaded successfully.");
+        // Generate unique output paths for each endpoint
+        let stego_path = format!("/home/magdeldin@auc.egy/stego_{}.png", index);
+        let finale_path = format!("/home/magdeldin@auc.egy/finale_{}.png", index);
 
-    let stegano = image_steganographer_proxy.encode(secret_image_bytes, "/home/magdeldin@auc.egy/stego.png").unwrap();
-    println!("Encode method invoked successfully.");
+        let stegano = image_steganographer_proxy.encode(secret_image_bytes, &stego_path).unwrap();
+        println!("Encode method invoked successfully for endpoint {}", index);
 
-    // Test the decode method
-    let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-    let finale = local_steganogragrapher.decode(&stegano,"/home/magdeldin@auc.egy/finale.png").unwrap();
-    println!("Decode method invoked successfully.");
+        let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
+        let finale = local_steganogragrapher.decode(&stegano, &finale_path).unwrap();
+        println!("Decode method invoked successfully for endpoint {}", index);
+    }
 
 
 

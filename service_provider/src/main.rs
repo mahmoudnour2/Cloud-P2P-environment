@@ -16,27 +16,44 @@ use quinn_proto::crypto::rustls::QuicClientConfig;
 async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
-    let server_addr: SocketAddr = "10.7.16.71:5000".parse()?;  // Connect to server's port
+    let server_addrs: Vec<SocketAddr> = vec![
+        "10.7.16.71:5000".parse()?,
+        "10.7.16.71:5001".parse()?,
+        "10.7.16.71:5002".parse()?
+    ];  // Connect to server's ports
     let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 
-    let (server_endpoint, _server_cert) = make_server_endpoint(server_addr).unwrap();
+    
+    let mut server_endpoints = Vec::new();
+    for addr in server_addrs {
+        let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
+        server_endpoints.push(endpoint);
+    }
 
     println!("Quinn endpoints setup successfully.");
     // Create transport ends
     println!("Creating transport ends.");
-    let transport_ends = create(server_endpoint).await?;
+    let mut transport_ends_vec = Vec::new();
+    for endpoint in server_endpoints {
+        let ends = create(endpoint).await?;
+        transport_ends_vec.push(ends);
+    }
     println!("Transport ends created successfully.");
     
     // Create RTO context
     println!("Creating RTO context.");
-    let _context_steganographer = Context::with_initial_service_export(
-        Config::default_setup(),
-        transport_ends.send,
-        transport_ends.recv,
-        ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
-    );
+    let mut contexts = Vec::new();
+    for ends in transport_ends_vec {
+        let context = Context::with_initial_service_export(
+            Config::default_setup(),
+            ends.send,
+            ends.recv,
+            ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
+        );
+        contexts.push(context);
+    }
     println!("RTO context created successfully.");
     
     // Create and register the steganographer service

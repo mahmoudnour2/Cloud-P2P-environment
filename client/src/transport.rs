@@ -24,7 +24,7 @@ impl From<quinn::ConnectionError> for QuinnTransportError {
 }
 
 // Modified IntraSend to use Quinn
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct QuinnSend {
     connection: Connection,
     runtime: Arc<Runtime>,
@@ -56,7 +56,7 @@ impl TransportSend for QuinnSend {
 }
 
 // Modified IntraRecv to use Quinn
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QuinnRecv {
     connection: Connection,
     runtime: Arc<Runtime>,
