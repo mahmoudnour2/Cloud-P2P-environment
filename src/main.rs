@@ -7,7 +7,6 @@ use std::sync::Arc;
 mod transport;
 mod image_steganographer;
 mod quinn_utils;
-mod main2;
 use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
 use transport::{create, TransportEnds};
 use quinn_utils::*;

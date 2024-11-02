@@ -7,11 +7,13 @@ use std::sync::Arc;
 mod transport;
 mod image_steganographer;
 mod quinn_utils;
+mod cloud_leader_election;
 use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
 use image;
 use transport::{create, TransportEnds};
 use quinn_utils::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
+use cloud_leader_election::{State, VoteReason, SystemMetrics, QuinnNode};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
