@@ -17,9 +17,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.71:5000".parse()?,
         "10.7.16.71:5001".parse()?,
-        "10.7.16.71:5002".parse()?
+        "10.7.16.71:5002".parse()?,
+        "10.7.16.71:5003".parse()?
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
 
@@ -60,12 +60,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("RTO context created successfully for endpoint {}", index);
 
         // Load the secret image
-        let secret_image = tokio::task::spawn_blocking(move || {
+        let secret_image = tokio::task::block_in_place(move || {
             let img = image::open("/home/magdeldin@auc.egy/Cloud-P2P-environment/client/secret.jpg").unwrap();
             let mut buffer = Vec::new();
             img.write_to(&mut buffer, image::ImageFormat::PNG).unwrap();
             buffer
-        }).await?;
+        });
+
         let secret_image_bytes: &[u8] = &secret_image;
         println!("Secret image loaded successfully for endpoint {}", index);
 
@@ -77,7 +78,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Encode method invoked successfully for endpoint {}", index);
 
         let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-        let finale = local_steganogragrapher.decode(&stegano, &finale_path).unwrap();
+        let _finale = local_steganogragrapher.decode(&stegano, &finale_path).unwrap();
         println!("Decode method invoked successfully for endpoint {}", index);
     }
 
