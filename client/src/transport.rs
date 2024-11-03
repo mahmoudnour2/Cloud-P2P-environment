@@ -27,7 +27,7 @@ impl From<quinn::ConnectionError> for QuinnTransportError {
 #[derive(Debug,Clone)]
 pub struct QuinnSend {
     connection: Connection,
-    runtime: Arc<Runtime>,
+    //runtime: Arc<Runtime>,
 }
 
 
@@ -59,7 +59,7 @@ impl TransportSend for QuinnSend {
 #[derive(Debug, Clone)]
 pub struct QuinnRecv {
     connection: Connection,
-    runtime: Arc<Runtime>,
+    //runtime: Arc<Runtime>,
 }
 
 impl TransportRecv for QuinnRecv {
@@ -114,11 +114,9 @@ pub async fn create(client_endpoint: Endpoint, server_address: SocketAddr) -> Re
     Ok(TransportEnds {
         send: QuinnSend {
             connection: client_conn.clone(),
-            runtime: runtime.clone(),
         },
         recv: QuinnRecv {
             connection: client_conn.clone(),
-            runtime: runtime.clone(),
         },
     })
 }

@@ -27,7 +27,6 @@ impl From<quinn::ConnectionError> for QuinnTransportError {
 #[derive(Debug)]
 pub struct QuinnSend {
     connection: Connection,
-    runtime: Arc<Runtime>,
 }
 
 
@@ -59,7 +58,6 @@ impl TransportSend for QuinnSend {
 #[derive(Debug)]
 pub struct QuinnRecv {
     connection: Connection,
-    runtime: Arc<Runtime>,
 }
 
 impl TransportRecv for QuinnRecv {
@@ -100,7 +98,6 @@ pub struct TransportEnds {
 
 // Create function now establishes Quinn connections
 pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn Error>> {
-    let runtime = Arc::new(Runtime::new()?);
     
     // Establish connections
     println!("Establishing connections...");
@@ -110,11 +107,9 @@ pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn 
     Ok(TransportEnds {
         send: QuinnSend {
             connection: server_conn.clone(),
-            runtime: runtime.clone(),
         },
         recv: QuinnRecv {
             connection: server_conn,
-            runtime: runtime.clone(),
         },
     })
 }
