@@ -17,11 +17,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.71:5000".parse()?,
         "10.7.16.71:5001".parse()?,
-        "10.7.16.71:5002".parse()?
+        "10.7.16.71:5002".parse()?,
+        "10.7.16.71:5003".parse()?
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
+    //let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 

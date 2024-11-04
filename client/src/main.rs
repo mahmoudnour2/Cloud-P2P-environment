@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "10.7.16.71:5002".parse()?,
         "10.7.16.71:5003".parse()?
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
+    let client_addr: SocketAddr = "10.7.16.71:4800".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         
         // Create RTO context
         println!("Creating RTO context for endpoint {}", index);
-        let (_context_user, image_steganographer): (_, ServiceToImport<dyn ImageSteganographer>) =
+        let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
             Context::with_initial_service_import(Config::default_setup(), transport_end.send.clone(), transport_end.recv.clone());
         let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
         println!("RTO context created successfully for endpoint {}", index);
@@ -80,6 +80,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
         let _finale = local_steganogragrapher.decode(&stegano, &finale_path).unwrap();
         println!("Decode method invoked successfully for endpoint {}", index);
+
+        // Clean up resources by explicitly dropping services
+        drop(image_steganographer_proxy); // Drop the proxy before the context
+        drop(context_user); // Drop the context before the transport ends
+        println!("Transport end {} processed successfully.", index);
     }
 
 
