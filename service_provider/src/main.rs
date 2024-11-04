@@ -47,14 +47,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     */
 
     // Setup Quinn endpoints
-    let server_addr: SocketAddr = "10.7.16.71:5000".parse()?;  // Connect to server's port
+    let server_addr: SocketAddr = "10.7.19.117:5014".parse()?;  // Connect to server's port
     let client_addresses: Vec<SocketAddr> = vec![
-        "10.7.16.80:5000".parse()?,
+        "10.7.16.154:5014".parse()?,
     ];
     println!("Quinn endpoints setup beginning.");
-    let mut quinn_node = Node::new(5,server_addr,client_addresses).await?;
-    //quinn_node.run().await;
-    quinn_node.broadcast_heartbeat().await;
+    let mut quinn_node = Node::new(2,server_addr,client_addresses).await?;
+    quinn_node.run().await;
+    //quinn_node.broadcast_heartbeat().await;
     println!("Quinn endpoints setup successfully.");
     // Keep the server running
     tokio::signal::ctrl_c().await?;

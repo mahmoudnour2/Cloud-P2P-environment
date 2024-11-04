@@ -141,7 +141,7 @@ impl Node {
             self.broadcast_heartbeat().await;
 
             // Accept incoming connections and messages with a timeout
-            match timeout(Duration::from_secs(1), self.server_endpoint.accept()).await {
+            match timeout(Duration::from_secs(10), self.server_endpoint.accept()).await {
                 Ok(Some(incoming)) => {
                     if let Ok(conn) = incoming.await {
                         if let Ok((send, mut recv)) = conn.accept_bi().await {
@@ -191,46 +191,44 @@ impl Node {
                 self.state = State::DefactoLeader;
                 return;
             }
-
+            println!("Listening!!!");
             // Accept incoming connections and messages with a timeout
-            match timeout(Duration::from_secs(1), self.server_endpoint.accept()).await {
-                Ok(Some(incoming)) => {
-                    if let Ok(conn) = incoming.await {
-                        if let Ok((send, mut recv)) = conn.accept_bi().await {
-                            if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
-                                if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
-                                    match msg {
-                                        NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
-                                            println!("Node {} received heartbeat from leader {}", self.id, leader_id);
-                                            self.last_heartbeat = Instant::now();
-                                            self.current_leader_id = Some(leader_id);
-                                            self.candidates = candidates;
-                                            
-                                            if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
-                                                self.send_negative_vote(leader_id, reason).await;
-                                            }
+            if let Some(incoming) = self.server_endpoint.accept().await {
+                if let Ok(conn) = incoming.await {
+                    println!("{}",conn.remote_address());
+                    if let Ok((send, mut recv)) = conn.accept_bi().await {
+                        println!("Connection Accepted");
+                        
+                        if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
+                            if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
+                                match msg {
+                                    NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
+                                        println!("Node {} received heartbeat from leader {}", self.id, leader_id);
+                                        self.last_heartbeat = Instant::now();
+                                        self.current_leader_id = Some(leader_id);
+                                        self.candidates = candidates;
+                                        
+                                        if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
+                                            self.send_negative_vote(leader_id, reason).await;
                                         }
-                                        NodeMessage::ElectionResult { new_leader_id } => {
-                                            if new_leader_id == self.id {
-                                                self.state = State::Leader;
-                                                return;
-                                            } else {
-                                                self.current_leader_id = Some(new_leader_id);
-                                            }
-                                        }
-                                        _ => {}
                                     }
+                                    NodeMessage::ElectionResult { new_leader_id } => {
+                                        if new_leader_id == self.id {
+                                            self.state = State::Leader;
+                                            return;
+                                        } else {
+                                            self.current_leader_id = Some(new_leader_id);
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
                     }
-                }
-                Ok(None) => {
-                    // No incoming connection within the timeout duration
-                }
-                Err(_) => {
-                    // Timeout occurred
-                    println!("Node {} timed out waiting for heartbeat", self.id);
+                    else
+                    {
+                        println!("CONNECTION NEVER ACCEPTED");
+                    }
                 }
             }
 
@@ -383,17 +381,24 @@ impl Node {
                     let conn = client_endpoint.connect(
                         peer_addr,
                         "localhost",
-                    ).map_err(|e| anyhow::anyhow!("{}", e))?
-                    .await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        
+                    ).unwrap()
+                    .await
+                    .unwrap();
+                println!("[client] connected: addr={}", conn.remote_address());
+
                     if let Ok((mut send, _recv)) = conn.open_bi().await {
                         println!("Sending message to {}", peer_addr);
                         let _ = send.write_all(&msg_bytes); 
+                        println!("wrote mesagge");
                         let _ = send.finish();
+                        println!("finished mesaggess");
+                        sleep(Duration::from_millis(200)).await;
                     }
                     Ok(())
                 }.await;
-                
+
+                println!("Message sent to {}", peer_addr);
+
                 if let Err(e) = result {
                     println!("Error sending message to {}: {}", peer_addr, e);
                 }
