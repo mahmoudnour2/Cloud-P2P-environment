@@ -17,13 +17,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.71:5001".parse()?,
-        "10.7.16.71:5002".parse()?,
-        "10.7.16.71:5003".parse()?
+        "127.0.0.1:5001".parse()?,
+        "127.0.0.1:5002".parse()?,
+        "127.0.0.1:5050".parse()?
     ];  // Connect to server's ports
-    //let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
+    let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
 
+    // let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;
     println!("Quinn endpoints setup beginning.");
+
+    // let (endpoint, _cert) = make_server_endpoint(server_addr).unwrap();
 
     
     let mut server_endpoints = Vec::new();
@@ -32,18 +35,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         server_endpoints.push(endpoint);
     }
 
+    
+
     println!("Quinn endpoints setup successfully.");
     // Create transport ends
     println!("Creating transport ends.");
+    
     let mut transport_ends_vec = Vec::new();
     for endpoint in server_endpoints {
         let ends = create(endpoint).await?;
         transport_ends_vec.push(ends);
     }
+
+    //let ends = create(endpoint).await?;
+
     println!("Transport ends created successfully.");
     
     // Create RTO context
     println!("Creating RTO context.");
+
     let mut contexts = Vec::new();
     for ends in transport_ends_vec {
         let context = Context::with_initial_service_export(
@@ -54,6 +64,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         contexts.push(context);
     }
+
+    // let context = Context::with_initial_service_export(
+    //         Config::default_setup(),
+    //         ends.send,
+    //         ends.recv,
+    //         ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
+    //     );
+
     println!("RTO context created successfully.");
     
     // Create and register the steganographer service

@@ -58,13 +58,22 @@ impl TransportSend for QuinnSend {
         let result =
         futures::executor::block_on(async {
             let (mut send, _recv) = self.connection.open_bi().await
-                .map_err(|e| TransportError::Custom)?;
+                .map_err(|e| {
+                    eprintln!("Error opening bidirectional stream: {:?}", e);
+                    TransportError::Custom
+                })?;
             
             send.write_all(&data).await
-                .map_err(|e| TransportError::Custom)?;
+                .map_err(|e| {
+                    eprintln!("Error writing data: {:?}", e);
+                    TransportError::Custom
+                })?;
             
             send.finish()
-                .map_err(|e| TransportError::Custom)
+                .map_err(|e| {
+                    eprintln!("Error finishing stream: {:?}", e);
+                    TransportError::Custom
+                })
         });
         
 
