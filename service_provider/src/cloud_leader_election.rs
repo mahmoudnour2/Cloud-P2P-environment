@@ -110,7 +110,7 @@ impl Node {
 
         let mut node = Node {
             id,
-            state: State::Leader,
+            state: State::Follower,
             metrics: SystemMetrics::default(),
             last_heartbeat: Instant::now(),
             heartbeat_timeout: Duration::from_secs(5),
@@ -136,57 +136,57 @@ impl Node {
             }
         }
     }
-
+ 
     async fn run_leader(&mut self) {
-        loop {
-            // Update metrics before sending heartbeat
-            let new_metrics = self.collect_metrics();
-            self.metrics = new_metrics;
-            self.broadcast_heartbeat().await;
-
-            // Accept incoming connections and messages with a timeout
-            match timeout(Duration::from_secs(10), self.server_endpoint.accept()).await {
-                Ok(Some(incoming)) => {
-                    if let Ok(conn) = incoming.await {
-                        if let Ok((send, mut recv)) = conn.accept_bi().await {
-                            if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
-                                if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
-                                    match msg {
-                                        NodeMessage::NegativeVote { voter_id, reason, metrics } => {
-                                            println!("Leader received negative vote from Node {} due to {:?}", voter_id, reason);
-                                            self.negative_votes_received.insert(voter_id, reason.clone());
-                                            self.update_candidate(voter_id, metrics);
-                                            
-                                            if self.negative_votes_received.len() >= 2 {
-                                                println!("Received enough negative votes, stepping down");
-                                                self.state = State::DefactoLeader;
-                                                return;
+            loop {
+                // Update metrics before sending heartbeat
+                let new_metrics = self.collect_metrics();
+                self.metrics = new_metrics;
+                self.broadcast_heartbeat().await;
+    
+                // Accept incoming connections and messages with a timeout
+                match timeout(Duration::from_secs(1), self.server_endpoint.accept()).await {
+                    Ok(Some(incoming)) => {
+                        if let Ok(conn) = incoming.await {
+                            if let Ok((send, mut recv)) = conn.accept_bi().await {
+                                if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
+                                    if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
+                                        match msg {
+                                            NodeMessage::NegativeVote { voter_id, reason, metrics } => {
+                                                println!("Leader received negative vote from Node {} due to {:?}", voter_id, reason);
+                                                self.negative_votes_received.insert(voter_id, reason.clone());
+                                                self.update_candidate(voter_id, metrics);
+                                                
+                                                if self.negative_votes_received.len() >= 2 {
+                                                    println!("Received enough negative votes, stepping down");
+                                                    self.state = State::DefactoLeader;
+                                                    return;
+                                                }
                                             }
+                                            NodeMessage::UpdateMetrics(new_metrics) => {
+                                                self.metrics = new_metrics;
+                                                println!("Updated leader metrics: CPU: {:.1}%, Memory: {:.1}%", 
+                                                    self.metrics.cpu_load, self.metrics.memory_usage);
+                                            }
+                                            _ => {}
                                         }
-                                        NodeMessage::UpdateMetrics(new_metrics) => {
-                                            self.metrics = new_metrics;
-                                            println!("Updated leader metrics: CPU: {:.1}%, Memory: {:.1}%", 
-                                                self.metrics.cpu_load, self.metrics.memory_usage);
-                                        }
-                                        _ => {}
                                     }
                                 }
                             }
                         }
                     }
+                    Ok(None) => {
+                        // No incoming connection within the timeout duration
+                    }
+                    Err(_) => {
+                        // Timeout occurred
+                        println!("Leader timed out waiting for boradcasting heartbeat");
+                    }
                 }
-                Ok(None) => {
-                    // No incoming connection within the timeout duration
-                }
-                Err(_) => {
-                    // Timeout occurred
-                    println!("Leader timed out waiting for boradcasting heartbeat");
-                }
+    
+                sleep(Duration::from_secs(1)).await;
             }
-
-            sleep(Duration::from_secs(1)).await;
         }
-    }
 
     async fn run_follower(&mut self) {
         loop {
@@ -196,55 +196,64 @@ impl Node {
                 return;
             }
             println!("Listening!!!");
+    
             // Accept incoming connections and messages with a timeout
-            if let Some(incoming) = self.server_endpoint.accept().await {
-                if let Ok(conn) = incoming.await {
-                    println!("{}",conn.remote_address());
-                    if let Ok((send, mut recv)) = conn.accept_bi().await {
-                        println!("Connection Accepted");
-                        
-                        if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
-                            println!("Message Received");
-
-                            if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
-                                match msg {
-                                    NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
-                                        println!("Node {} received heartbeat from leader {}", self.id, leader_id);
-                                        self.last_heartbeat = Instant::now();
-                                        self.current_leader_id = Some(leader_id);
-                                        self.candidates = candidates;
-                                        
-                                        if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
-                                            self.send_negative_vote(leader_id, reason).await;
+            match timeout(Duration::from_secs(1), self.server_endpoint.accept()).await {
+                Ok(Some(incoming)) => {
+                    if let Ok(conn) = incoming.await {
+                        println!("{}", conn.remote_address());
+                        if let Ok((send, mut recv)) = conn.accept_bi().await {
+                            println!("Connection Accepted");
+                            //sleep(Duration::from_millis(500)).await;
+    
+                            if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
+                                println!("Message Received");
+                                println!("Message length: {}", msg_bytes.len());
+    
+                                if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
+                                    println!("Begin Message Decoding");
+                                    match msg {
+                                        NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
+                                            println!("Node {} received heartbeat from leader {}", self.id, leader_id);
+                                            self.last_heartbeat = Instant::now();
+                                            self.current_leader_id = Some(leader_id);
+                                            self.candidates = candidates;
+    
+                                            if let Some(reason) = self.should_cast_negative_vote(&leader_metrics) {
+                                                self.send_negative_vote(leader_id, reason).await;
+                                            }
                                         }
-                                    }
-                                    NodeMessage::ElectionResult { new_leader_id } => {
-                                        println!("Node {} received election result: new leader is {}", self.id, new_leader_id);
-                                        if new_leader_id == self.id {
-                                            self.state = State::Leader;
-                                            return;
-                                        } else {
-                                            self.current_leader_id = Some(new_leader_id);
+                                        NodeMessage::ElectionResult { new_leader_id } => {
+                                            println!("Node {} received election result: new leader is {}", self.id, new_leader_id);
+                                            if new_leader_id == self.id {
+                                                self.state = State::Leader;
+                                                return;
+                                            } else {
+                                                self.current_leader_id = Some(new_leader_id);
+                                            }
                                         }
+                                        _ => {}
                                     }
-                                    _ => {}
+                                } else {
+                                    println!("MESSAGE NEVER DECODED");
                                 }
+                            } else {
+                                println!("MESSAGE NEVER RECEIVED");
                             }
-                            else {
-                                println!("MESSAGE NEVER DECODED");
-                            }
+                        } else {
+                            println!("CONNECTION NEVER ACCEPTED");
                         }
-                        else {
-                            println!("MESSAGE NEVER RECEIVED");
-                        }
-                    }
-                    else
-                    {
-                        println!("CONNECTION NEVER ACCEPTED");
                     }
                 }
+                Ok(None) => {
+                    // No incoming connection within the timeout duration
+                }
+                Err(_) => {
+                    // Timeout occurred
+                    println!("Timeout occurred while waiting for incoming connections");
+                }
             }
-
+    
             sleep(Duration::from_millis(500)).await;
         }
     }
@@ -380,6 +389,8 @@ impl Node {
 
         let msg_bytes = bincode::serialize(&msg).expect("Failed to serialize message");
 
+        let msg_bytes = &msg_bytes;
+
         let mut tasks = vec![];
 
         for (peer_addr, client_endpoint) in &self.client_endpoints {
@@ -401,7 +412,7 @@ impl Node {
 
                     if let Ok((mut send, _recv)) = conn.open_bi().await {
                         println!("Sending message to {}", peer_addr);
-                        let _ = send.write_all(&msg_bytes); 
+                        let _ = send.write_all(&msg_bytes).await; 
                         println!("wrote mesagge");
                         let _ = send.finish();
                         println!("finished mesaggess");
