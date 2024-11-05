@@ -13,14 +13,14 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use quinn::{ClientConfig, Endpoint, ServerConfig};
 use quinn_proto::crypto::rustls::QuicClientConfig;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime, PrivatePkcs8KeyDer};
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
+use std::error::Error;
+use std::fs::File;
+use std::net::ToSocketAddrs;
 use tracing::{error, info};
 use url::Url;
-use quinn::{Endpoint, ClientConfig, ServerConfig};
-use std::error::Error;
-use std::net::ToSocketAddrs;
-use std::fs::File;
 
 pub fn strip_ipv6_brackets(host: &str) -> &str {
     // An ipv6 url looks like eg https://[::1]:4433/Cargo.toml, wherein the host [::1] is the
@@ -88,7 +88,6 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
         self.0.signature_verification_algorithms.supported_schemes()
     }
 }
-
 
 pub fn make_client_endpoint(
     bind_addr: SocketAddr,

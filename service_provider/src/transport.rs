@@ -6,6 +6,7 @@ use futures::executor;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::error::Error;
+use std::thread;
 use tokio::runtime::Runtime;
 
 // Custom transport error types
@@ -24,10 +25,10 @@ impl From<quinn::ConnectionError> for QuinnTransportError {
 }
 
 // Modified IntraSend to use Quinn
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct QuinnSend {
     connection: Connection,
-    runtime: Arc<Runtime>,
+    //runtime: Arc<Runtime>,
 }
 
 
@@ -38,6 +39,22 @@ impl TransportSend for QuinnSend {
         timeout: Option<std::time::Duration>,
     ) -> Result<(), TransportError> {
         let data = data.to_vec();
+        let connection = self.connection.clone();
+        
+        // let result = thread::spawn(move || {
+        //     futures::executor::block_on(async {
+        //         let (mut send, _recv) = connection.open_bi().await
+        //             .map_err(|_| TransportError::Custom)?;
+                
+        //         send.write_all(&data).await
+        //             .map_err(|_| TransportError::Custom)?;
+                
+        //         send.finish()
+        //             .map_err(|_| TransportError::Custom)
+        //     })
+        // }).join().expect("Thread panicked");
+        
+        
         futures::executor::block_on(async {
             let (mut send, _recv) = self.connection.open_bi().await
                 .map_err(|e| TransportError::Custom)?;
@@ -48,6 +65,7 @@ impl TransportSend for QuinnSend {
             send.finish()
                 .map_err(|e| TransportError::Custom)
         })
+        
     }
 
     fn create_terminator(&self) -> Box<dyn Terminate> {
@@ -56,23 +74,38 @@ impl TransportSend for QuinnSend {
 }
 
 // Modified IntraRecv to use Quinn
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QuinnRecv {
     connection: Connection,
-    runtime: Arc<Runtime>,
+    //runtime: Arc<Runtime>,
 }
 
 impl TransportRecv for QuinnRecv {
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, TransportError> {
         
+        let connection = self.connection.clone();
+        // let result:Result<Vec<u8>, TransportError> = thread::spawn(move || {
+        //     futures::executor::block_on(async {
+        //         let (_, mut recv) = connection.accept_bi().await
+        //             .map_err(|_| TransportError::Custom)?;
+                
+        //         let mut buffer = Vec::new();
+        //         let max_size = 30*1024 * 1024; // 30MB max size, adjust as needed
+        //         buffer = recv.read_to_end(max_size).await
+        //             .map_err(|_| TransportError::Custom)?;
+                
+        //         Ok(buffer)
+        //     })
+        // }).join().expect("Thread panicked");
+
         futures::executor::block_on(async {
             let (_, mut recv) = self.connection.accept_bi().await
-                .map_err(|e| TransportError::Custom)?;
+                .map_err(|_| TransportError::Custom)?;
             
                 let mut buffer = Vec::new();
                 let max_size = 30*1024 * 1024; // 30MB max size, adjust as needed
                 buffer = recv.read_to_end(max_size).await
-                    .map_err(|e| TransportError::Custom)?;
+                    .map_err(|_| TransportError::Custom)?;
                 
                 Ok(buffer)
         })
@@ -98,9 +131,9 @@ pub struct TransportEnds {
     pub recv: QuinnRecv,
 }
 
+
 // Create function now establishes Quinn connections
 pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn Error>> {
-    let runtime = Arc::new(Runtime::new()?);
     
     // Establish connections
     println!("Establishing connections...");
@@ -110,11 +143,9 @@ pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn 
     Ok(TransportEnds {
         send: QuinnSend {
             connection: server_conn.clone(),
-            runtime: runtime.clone(),
         },
         recv: QuinnRecv {
             connection: server_conn,
-            runtime: runtime.clone(),
         },
     })
 }
