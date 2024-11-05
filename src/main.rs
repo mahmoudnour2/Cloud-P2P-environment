@@ -1,16 +1,16 @@
-use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
-use remote_trait_object::{Config, Context, Service, ServiceToExport};
+use quinn::{Endpoint, ServerConfig, TransportConfig, ClientConfig};
 use std::error::Error;
 use std::net::SocketAddr;
+use remote_trait_object::{Context, Service, ServiceToExport, Config};
 use std::sync::Arc;
 
+mod transport;
 mod image_steganographer;
 mod quinn_utils;
-mod transport;
 use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
-use quinn_proto::crypto::rustls::QuicClientConfig;
-use quinn_utils::*;
 use transport::{create, TransportEnds};
+use quinn_utils::*;
+use quinn_proto::crypto::rustls::QuicClientConfig;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Setup Quinn endpoints
@@ -18,16 +18,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client_addr: SocketAddr = "127.0.0.1:0".parse()?;
 
     let (server_endpoint, _server_cert) = make_server_endpoint(server_addr).unwrap();
-
+    
+    
     let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
-    client_endpoint.set_default_client_config(ClientConfig::new(Arc::new(
-        QuicClientConfig::try_from(
-            rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(SkipServerVerification::new())
-                .with_no_client_auth(),
-        )?,
-    )));
+    client_endpoint.set_default_client_config(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(SkipServerVerification::new())
+            .with_no_client_auth(),
+    )?)));
 
     // Create transport ends
     let transport_ends = create(server_endpoint, client_endpoint).await?;
@@ -37,17 +36,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Config::default_setup(),
         transport_ends.send1,
         transport_ends.recv1,
-        ServiceToExport::new(
-            Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>
-        ),
+        ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
     );
-
+    
     // Create and register the steganographer service
     let steganographer = SomeImageSteganographer::new(90, 10);
+
 
     // Keep the server running
     tokio::signal::ctrl_c().await?;
     println!("Shutting down server...");
 
     Ok(())
-}
+} 
