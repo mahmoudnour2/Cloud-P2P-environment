@@ -59,12 +59,12 @@ impl ImageSteganographer for SomeImageSteganographer {
         temp_secret_file.flush().map_err(|e| e.to_string())?;
 
         // Load the secret image from the temporary file
-        let secret_image = File::open(temp_secret_path).map_err(|e| e.to_string())?;
+        //let secret_image = File::open(temp_secret_path).map_err(|e| e.to_string())?;
         
 
         // Load the carrier image
         //let carrier_path = "/home/magdeldin/Cloud-P2P-environment/service_provider/carrier.jpg";
-        let carrier_path = "/home/magdeldin/wot.png";
+        let carrier_path = "/home/magdeldin/carrier.png";
         //let carrier = file_as_dynamic_image(carrier_path.to_string());
 
         // let carrier = if carrier_path.ends_with(".jpg") || carrier_path.ends_with(".jpeg") {
@@ -99,6 +99,9 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         let mut buffer = Vec::new();
         encoded_image.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
+        // Delete the temporary secret image file
+        //std::fs::remove_file(temp_secret_path).map_err(|e| e.to_string())?;
+        println!("Buffer length: {}", buffer.len());
         
         Ok(buffer)
     }
@@ -130,6 +133,8 @@ impl ImageSteganographer for SomeImageSteganographer {
         
         let mut buffer = Vec::new();
         decoded_image.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
+        // Delete the temporary encoded image file
+        std::fs::remove_file(temp_enc_path).map_err(|e| e.to_string())?;
         Ok(buffer)
     }
 }
