@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use std::cmp::Ordering;
 use serde::{Serialize, Deserialize};
-use quinn::{Endpoint, ClientConfig, ServerConfig,Connection};
+use quinn::{ClientConfig, Connection, Endpoint, ServerConfig, TransportConfig};
 use quinn_proto::crypto::rustls::QuicClientConfig;
 use std::net::SocketAddr;
 use std::error::Error;
@@ -94,12 +94,16 @@ impl Node {
             println!("Setting up client endpoint for peer {}", peer_addr);
             let mut client_endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
             println!("Client endpoint created for peer {}", peer_addr);
-            client_endpoint.set_default_client_config(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+            let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
                 rustls::ClientConfig::builder()
                     .dangerous()
                     .with_custom_certificate_verifier(SkipServerVerification::new())
                     .with_no_client_auth(),
-            )?)));
+            )?));
+            let mut transport_config = TransportConfig::default();
+            transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
+            client_config.transport_config(Arc::new(transport_config));
+            client_endpoint.set_default_client_config(client_config);
             println!("Client config set for peer {}", peer_addr);
             client_endpoints.push((peer_addr, client_endpoint));
         }
@@ -200,6 +204,8 @@ impl Node {
                         println!("Connection Accepted");
                         
                         if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
+                            println!("Message Received");
+
                             if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
                                 match msg {
                                     NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
@@ -213,6 +219,7 @@ impl Node {
                                         }
                                     }
                                     NodeMessage::ElectionResult { new_leader_id } => {
+                                        println!("Node {} received election result: new leader is {}", self.id, new_leader_id);
                                         if new_leader_id == self.id {
                                             self.state = State::Leader;
                                             return;
@@ -223,6 +230,12 @@ impl Node {
                                     _ => {}
                                 }
                             }
+                            else {
+                                println!("MESSAGE NEVER DECODED");
+                            }
+                        }
+                        else {
+                            println!("MESSAGE NEVER RECEIVED");
                         }
                     }
                     else
