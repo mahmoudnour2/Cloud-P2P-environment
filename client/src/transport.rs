@@ -119,7 +119,7 @@ impl TransportRecv for QuinnRecv {
                 .map_err(|_| TransportError::Custom)?;
             
                 let mut buffer = Vec::new();
-                let max_size = 30*1024 * 1024; // 30MB max size, adjust as needed
+                let max_size = 500*1024 * 1024; // 30MB max size, adjust as needed
                 buffer = recv.read_to_end(max_size).await
                     .map_err(|_| TransportError::Custom)?;
                 

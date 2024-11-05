@@ -17,6 +17,9 @@ use image;
 use steganography::{self, util::file_to_bytes};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
+    // Load the secret image
+
     
     // let l_steganographer = SomeImageSteganographer::new(100, 10);
     // // Load the secret image
@@ -133,6 +136,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Transport ends created successfully.");
 
+    let mut context_vector = Vec::new();
+    let mut image_steganographer_proxy_vector = Vec::new();
+
     
     // Process each transport end
     for (index, transport_end) in transport_ends_vec.iter().enumerate() {
@@ -142,46 +148,91 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Creating RTO context for endpoint {}", index);
         let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
             Context::with_initial_service_import(Config::default_setup(), transport_end.send.clone(), transport_end.recv.clone());
+        
+        //image_steganographer_vector.push(image_steganographer);
         let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
+        context_vector.push(context_user);
+        
+        image_steganographer_proxy_vector.push(image_steganographer_proxy);
+
         println!("RTO context created successfully for endpoint {}", index);
 
-        // Load the secret image
-        let secret_path = "/home/magdeldin/Cloud-P2P-environment/client/secret.jpg";
+        // // Load the secret image
+        // let secret_path = "/home/magdeldin/Cloud-P2P-environment/client/secret.jpg";
 
-        let secret_file = std::fs::File::open(secret_path).unwrap();
+        // let secret_file = std::fs::File::open(secret_path).unwrap();
         
-        let secret_image = file_to_bytes(secret_file);
+        // let secret_image = file_to_bytes(secret_file);
 
-        let secret_file_name = "secret.jpg";
+        // let secret_file_name = "secret.jpg";
 
-        let secret_image_bytes: &[u8] = &secret_image;
-        println!("Secret image loaded successfully for endpoint {}", index);
+        // let secret_image_bytes: &[u8] = &secret_image;
+        // println!("Secret image loaded successfully for endpoint {}", index);
 
-        // Generate unique output paths for each endpoint
-        let stego_path = format!("/home/magdeldin/stego.png");
-        let finale_path = format!("/home/magdeldin/Pictures");
+        // // Generate unique output paths for each endpoint
+        // let stego_path = format!("/home/magdeldin/stego.png");
+        // let finale_path = format!("/home/magdeldin/Pictures");
 
-        println!("Encoding secret image for endpoint {}...", index);
-        let stegano = image_steganographer_proxy.encode(secret_image_bytes, &stego_path);
-        let stegano = match stegano {
-            Ok(s) => s,
-            Err(e) => {
-                println!("Error encoding secret image for endpoint {}: {}", index, e);
-                continue;
-            }
-        };
-        println!("Encode method invoked successfully for endpoint {}", index);
+        // println!("Encoding secret image for endpoint {}...", index);
+        // let stegano = image_steganographer_proxy.encode(secret_image_bytes, &stego_path);
+        // let stegano = match stegano {
+        //     Ok(s) => s,
+        //     Err(e) => {
+        //         println!("Error encoding secret image for endpoint {}: {}", index, e);
+        //         continue;
+        //     }
+        // };
+        // println!("Encode method invoked successfully for endpoint {}", index);
 
-        let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-        let _finale = local_steganogragrapher.decode(&stegano, &finale_path, &secret_file_name).unwrap();
-        println!("Decode method invoked successfully for endpoint {}", index);
+        // let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
+        // let _finale = local_steganogragrapher.decode(&stegano, &finale_path, &secret_file_name).unwrap();
+        // println!("Decode method invoked successfully for endpoint {}", index);
+        // println!("Transport end {} processed successfully.", index);
+    }
+    
+    // Load all secret images from the secret_images folder
+    let secret_images_path = "secret_images";
+    let secret_images = std::fs::read_dir(secret_images_path)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .collect::<Vec<_>>();
 
-        // Clean up resources by explicitly dropping services
-        //drop(image_steganographer_proxy); // Drop the proxy before the context
-        //drop(context_user); // Drop the context before the transport ends
-        println!("Transport end {} processed successfully.", index);
+
+    for i in 0..10 {
+        println!("Iteration {}", i);
+        for (index, entry) in secret_images.iter().enumerate() {
+            let secret_path = entry.path();
+            let secret_file_name = secret_path.file_name().unwrap().to_str().unwrap();
+    
+            println!("Processing secret image {}: {}", index, secret_file_name);
+    
+            let secret_file = std::fs::File::open(&secret_path).unwrap();
+            let secret_image = file_to_bytes(secret_file);
+            let secret_image_bytes: &[u8] = &secret_image;
+    
+            // Generate unique output paths for each image
+            let stego_path = format!("encoded_images/stego_{}.png", index);
+            let finale_path = format!("decoded_images");
+    
+            println!("Encoding secret image {}...", index);
+            let stegano = image_steganographer_proxy_vector[index % image_steganographer_proxy_vector.len()].encode(secret_image_bytes, &stego_path);
+
+            let stegano = match stegano {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("Error encoding secret image {}: {}", index, e);
+                    continue;
+                }
+            };
+            println!("Encode method invoked successfully for secret image {}", index);
+    
+            let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
+            let _finale = local_steganogragrapher.decode(&stegano, &finale_path, &secret_file_name).unwrap();
+            println!("Decode method invoked successfully for secret image {}", index);
+        }
     }
 
+    
     
 
     // Keep the server running

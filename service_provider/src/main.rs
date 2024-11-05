@@ -21,7 +21,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "127.0.0.1:5002".parse()?,
         "127.0.0.1:5050".parse()?
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.16.80:4800".parse()?;  // Listen on this port
 
     // let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;
     println!("Quinn endpoints setup beginning.");
