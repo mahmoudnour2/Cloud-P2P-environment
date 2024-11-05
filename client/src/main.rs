@@ -215,7 +215,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let finale_path = format!("decoded_images");
     
             println!("Encoding secret image {}...", index);
+            let start_time = std::time::Instant::now();
             let stegano = image_steganographer_proxy_vector[index % image_steganographer_proxy_vector.len()].encode(secret_image_bytes, &stego_path);
+            let duration = start_time.elapsed();
+            println!("Encoding time for secret image {}: {:.2?} seconds", index, duration.as_secs_f64());
 
             let stegano = match stegano {
                 Ok(s) => s,
