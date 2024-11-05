@@ -87,6 +87,7 @@ impl Node {
         println!("Setting up server endpoint on {}", server_addr);
         let (server_endpoint, _cert) = make_server_endpoint(server_addr).map_err(|e| anyhow::anyhow!(e))?;
         
+        
         // Setup client endpoints
         println!("Setting up client endpoints for {} peers", peer_addrs.len());
         let mut client_endpoints = Vec::new();
@@ -427,6 +428,15 @@ impl Node {
                     println!("Error sending message to {}: {}", peer_addr, e);
                 }
             });
+            // Set a timeout for the task spawned
+            let task = tokio::time::timeout(Duration::from_secs(10), task);
+
+            let task = async {
+                match task.await {
+                    Ok(_) => (),
+                    Err(_) => println!("Timeout occurred while sending message"),
+                }
+            };
 
             tasks.push(task);
             

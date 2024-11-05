@@ -14,10 +14,11 @@ use std::{
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use quinn_proto::crypto::rustls::QuicClientConfig;
+use remote_trait_object::transport;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime, PrivatePkcs8KeyDer};
 use tracing::{error, info};
 use url::Url;
-use quinn::{Endpoint, ClientConfig, ServerConfig};
+use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use std::error::Error;
 use std::net::ToSocketAddrs;
 use std::fs::File;
@@ -111,7 +112,7 @@ pub fn make_client_endpoint(
 pub fn make_server_endpoint(
     bind_addr: SocketAddr,
 ) -> Result<(Endpoint, CertificateDer<'static>), Box<dyn Error + Send + Sync + 'static>> {
-    let (server_config, server_cert) = configure_server()?;
+    let (mut server_config, server_cert) = configure_server()?;
     let endpoint = Endpoint::server(server_config, bind_addr)?;
     Ok((endpoint, server_cert))
 }
@@ -143,6 +144,7 @@ pub fn configure_server(
         ServerConfig::with_single_cert(vec![cert_der.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_concurrent_uni_streams(0_u8.into());
+    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
 
     Ok((server_config, cert_der))
 }
