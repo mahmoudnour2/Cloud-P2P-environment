@@ -34,6 +34,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Quinn endpoints setup beginning.");
 
+    let my_id = 1; // Make sure this matches your node ID
+    let mut server_endpoints = Vec::new();
+    for addr in server_addrs {
+        let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
+        server_endpoints.push(endpoint);
+    }
+
+    let mut transport_ends_vec = Vec::new();
+    for endpoint in server_endpoints {
+        let ends = create(endpoint).await?;
+        transport_ends_vec.push(ends);
+    }
     // Spawn the Node task
     let node_handle = tokio::spawn(async move {
         let mut quinn_node = Node::new(1, server_addr, client_addresses).await?;
@@ -43,18 +55,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Spawn the steganographer service task
     let steg_handle = tokio::spawn(async move {
-        let my_id = 1; // Make sure this matches your node ID
-        let mut server_endpoints = Vec::new();
-        for addr in server_addrs {
-            let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
-            server_endpoints.push(endpoint);
-        }
-
-        let mut transport_ends_vec = Vec::new();
-        for endpoint in server_endpoints {
-            let ends = create(endpoint).await?;
-            transport_ends_vec.push(ends);
-        }
 
         let mut contexts = Vec::new();
         for ends in transport_ends_vec {
