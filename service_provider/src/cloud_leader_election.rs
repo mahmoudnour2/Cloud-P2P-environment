@@ -13,11 +13,9 @@ use std::error::Error;
 use anyhow::Result;
 use std::sync::Arc;
 use sysinfo::{System};
-use crate::quinn_utils::*;
+use crate::{quinn_utils::*, CURRENT_LEADER_ID};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-
-pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
@@ -176,7 +174,8 @@ impl Node {
                     // No incoming connection within the timeout duration
                 }
                 Err(_) => {
-                    println!("Leader timed out waiting for boradcasting heartbeat");
+                    //println!("Leader timed out waiting for boradcasting heartbeat");
+                    ();
                 }
             }
             
@@ -350,7 +349,7 @@ impl Node {
     }
 
     pub async fn broadcast_heartbeat(&self) {
-        println!("Node {} broadcasting heartbeat", self.id);
+        //println!("Node {} broadcasting heartbeat", self.id);
         self.broadcast_message(NodeMessage::Heartbeat {
             leader_id: self.id,
             metrics: self.metrics.clone(),
@@ -371,7 +370,7 @@ impl Node {
     }
 
     async fn broadcast_message(&self, msg: NodeMessage) -> Result<()> {
-        println!("Node {} broadcasting message", self.id);
+        //println!("Node {} broadcasting message", self.id);
         let msg_bytes = bincode::serialize(&msg)?;
         let msg_bytes = bincode::serialize(&msg).expect("Failed to serialize message");
         let msg_bytes = &msg_bytes;

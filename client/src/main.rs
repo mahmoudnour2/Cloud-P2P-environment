@@ -3,6 +3,7 @@ use std::error::Error;
 use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, Config, ServiceToImport};
 use std::sync::Arc;
+use std::time::Duration;
 
 mod transport;
 mod image_steganographer;
@@ -24,13 +25,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //let (server_endpoint, _server_cert) = make_server_endpoint(server_addr).unwrap();
     
     
-    let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
-    client_endpoint.set_default_client_config(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+    let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
         rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(SkipServerVerification::new())
             .with_no_client_auth(),
-    )?)));
+    )?));
+    let mut transport_config = TransportConfig::default();
+    transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
+    client_config.transport_config(Arc::new(transport_config));
+
+    let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
+    client_endpoint.set_default_client_config(client_config);
 
 
     println!("Quinn endpoints setup successfully.");
@@ -49,7 +55,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // load the secret image
     let secret_image = tokio::task::spawn_blocking(move || {
-        let img = image::open("/home/magdeldin@auc.egy/Cloud-P2P-environment/client/secret.jpg").unwrap();
+        let img = image::open("/home/magdeldin/Cloud-P2P-environment/client/secret.jpg").unwrap();
         let mut buffer = Vec::new();
         img.write_to(&mut buffer, image::ImageFormat::PNG).unwrap();
         buffer
@@ -59,12 +65,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Secret image loaded successfully.");
 
-    let stegano = image_steganographer_proxy.encode(secret_image_bytes, "/home/magdeldin@auc.egy/stego.png").unwrap();
+    let stegano = image_steganographer_proxy.encode(secret_image_bytes, "/home/magdeldin/stego.png").unwrap();
     println!("Encode method invoked successfully.");
 
     // Test the decode method
     let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-    let finale = local_steganogragrapher.decode(&stegano,"/home/magdeldin@auc.egy/finale.png").unwrap();
+    let finale = local_steganogragrapher.decode(&stegano,"/home/magdeldin/finale.png").unwrap();
     println!("Decode method invoked successfully.");
 
 

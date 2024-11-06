@@ -21,15 +21,15 @@ pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Setup Quinn endpoints for Node
-    let server_addr: SocketAddr = "10.7.16.71:5016".parse()?;
+    let server_addr: SocketAddr = "127.0.0.1:5016".parse()?;
     let client_addresses: Vec<SocketAddr> = vec![
-        "10.7.19.117:5016".parse()?,
-        "10.7.16.154:5016".parse()?,
+        //"10.7.19.117:5016".parse()?,
+        //"10.7.16.154:5016".parse()?,
     ];
 
     // Setup Quinn endpoints for steganographer
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.71:5017".parse()?,
+        "127.0.0.1:5000".parse()?,
     ];
 
     println!("Server endpoints created.");
@@ -38,6 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Spawn the Node task
     let node_handle = tokio::spawn(async move {
         quinn_node.run().await;
+        tokio::signal::ctrl_c().await.map_err(|e| Box::new(e) as Box<dyn Error + Send>)?;
         Ok::<(), Box<dyn Error + Send>>(())
     });
 
@@ -64,6 +65,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut contexts = Vec::new();
         for ends in transport_ends_vec {
             // Only create and export the service if this node is the leader
+            
+            println!("Steganographer service started - this node is the leader");
             if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
                 let context = Context::with_initial_service_export(
                     Config::default_setup(),
@@ -72,13 +75,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
                 );
                 contexts.push(context);
-                println!("Steganographer service started - this node is the leader");
             } else {
                 println!("Steganographer service not started - this node is not the leader");
             }
+
         }
 
         let _steganographer = SomeImageSteganographer::new(90, 10);
+        
+        // Wait for Ctrl-C
+        tokio::signal::ctrl_c().await.map_err(|e| Box::new(e) as Box<dyn Error + Send>)?;
+        println!("Shutting down server...");
+
         Ok::<(), Box<dyn Error + Send>>(())
     });
 
