@@ -131,6 +131,19 @@ impl Node {
                 State::Follower => self.run_follower().await,
                 State::DefactoLeader => self.handle_election().await,
             }
+            let ctrl_c_timeout = Duration::from_secs(1);
+            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
+                Ok(Ok(())) => {
+                    println!("Node {} received Ctrl+C, exiting...", self.id);
+                    break;
+                }
+                Ok(Err(e)) => {
+                    println!("Error waiting for Ctrl+C: {}", e);
+                }
+                Err(_) => {
+                    // Timeout occurred, continue the loop
+                }
+            }
         }
     }
     

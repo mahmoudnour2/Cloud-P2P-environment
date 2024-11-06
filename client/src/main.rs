@@ -102,9 +102,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "127.0.0.1:5001".parse()?,
-        "127.0.0.1:5002".parse()?,
-        "127.0.0.1:5050".parse()?
+        "127.0.0.1:5000".parse()?,
+        //"127.0.0.1:5002".parse()?,
+        //"127.0.0.1:5050".parse()?
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "127.0.0.1:4800".parse()?;  // Listen on this port
 

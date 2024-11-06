@@ -131,13 +131,31 @@ pub struct TransportEnds {
     pub recv: QuinnRecv,
 }
 
+impl TransportEnds {
+
+    pub fn is_active(&self) -> bool {
+
+        // Check if the connection is still active by attempting a simple operation with a timeout
+        let result = futures::executor::block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), self.send.connection.open_uni()).await
+        });
+
+        match result {
+            Ok(Ok(_)) => true,
+            _ => false,
+        }
+
+    }
+
+}
+
 
 // Create function now establishes Quinn connections
-pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn Error>> {
+pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, String> {
     
     // Establish connections
     println!("Establishing connections...");
-    let server_conn = server_endpoint.accept().await.unwrap().await?;
+    let server_conn = server_endpoint.accept().await.unwrap().await.map_err(|e| e.to_string())?;
     println!("Connections established successfully.");
 
     Ok(TransportEnds {

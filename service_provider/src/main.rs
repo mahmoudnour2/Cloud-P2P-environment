@@ -15,6 +15,9 @@ use transport::{create, TransportEnds};
 use quinn_utils::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
 use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
+use futures::{FutureExt, StreamExt};
+use tokio::time::{timeout, Duration};
+use tokio::sync::Mutex;
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -40,6 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let node_handle = tokio::spawn(async move {
         quinn_node.run().await;
         tokio::signal::ctrl_c().await.map_err(|e| Box::new(e) as Box<dyn Error + Send>)?;
+        println!("Shutting down node...");
         Ok::<(), Box<dyn Error + Send>>(())
     });
 
@@ -56,43 +60,165 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     println!("Server endpoints created.");
+    //let mut transport_ends_vec = Vec::new();
+    //loop{}
+    // for endpoint in &server_endpoints {
+    //     match timeout(Duration::from_secs(1), endpoint.accept()).await {
+    //         Ok(Some(incoming)) => {
+    //             if let Ok(conn) = incoming.await {
+    //                 if let Ok((send, mut recv)) = conn.accept_bi().await {
+    //                     let ends = create(endpoint.clone()).await?;
+    //                     transport_ends_vec.push(ends);
+    //                 }
+    //             }
+    //         }
+    //         Ok(None) => {
+    //             // No incoming connection within the timeout duration
+    //         }
+    //         Err(_) => {
+    //             //println!("Leader timed out waiting for boradcasting heartbeat");
+    //             ();
+    //         }
+    //     }
+    // }
+    // let mut transport_ends_vec = Vec::new();
+    // for endpoint in server_endpoints {
+    //     let ends = create(endpoint).await?;
+    //     transport_ends_vec.push(ends);
+    // }
 
-    let mut transport_ends_vec = Vec::new();
-    for endpoint in server_endpoints {
-        let ends = create(endpoint).await?;
-        transport_ends_vec.push(ends);
-    }
+    let transport_ends_vec = Arc::new(Mutex::new(Vec::new()));
+    let transport_ends_vec_clone = Arc::clone(&transport_ends_vec);
 
     println!("Server endpoints created.");
 
+    let connection_handle = tokio::spawn(async move {
+        loop {
+            for endpoint in &server_endpoints {
+                match timeout(Duration::from_secs(1), endpoint.accept()).await {
+                    Ok(Some(incoming)) => {
+                        if let Ok(conn) = incoming.await {
+                            if let Ok((send, mut recv)) = conn.accept_bi().await {
+                                let ends = match create(endpoint.clone()).await {
+                                    Ok(ends) => ends,
+                                    Err(e) => {
+                                        eprintln!("Failed to create transport ends: {}", e);
+                                        continue;
+                                    }
+                                };
+                                let mut vec = transport_ends_vec_clone.lock().await;
+                                vec.push(ends);
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // No incoming connection within the timeout duration
+                    }
+                    Err(_) => {
+                        // Handle timeout error
+                    }
+                }
+            }
+            let ctrl_c_timeout = Duration::from_secs(1);
+            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
+                Ok(Ok(())) => {
+                    break;
+                }
+                Ok(Err(e)) => {
+                    println!("Error waiting for Ctrl+C: {}", e);
+                }
+                Err(_) => {
+                    // Timeout occurred, continue the loop
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
+        // Wait for Ctrl-C
+        tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
+        println!("Shutting down connection handle...");
+        Ok::<(), String>(())
+    });
+
     // Spawn the steganographer service task
     let steg_handle = tokio::spawn(async move {
-        let mut contexts = Vec::new();
-        for ends in transport_ends_vec {
-            // Only create and export the service if this node is the leader
-            
-            println!("Steganographer service started - this node is the leader");
-            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
-                let context = Context::with_initial_service_export(
-                    Config::default_setup(),
-                    ends.send,
-                    ends.recv,
-                    ServiceToExport::new(Box::new(SomeImageSteganographer::new(75,10)) as Box<dyn ImageSteganographer>),
-                );
-                contexts.push(context);
-            } else {
-                println!("Steganographer service not started - this node is not the leader");
-            }
+        
 
+        
+        
+        let mut contexts = Vec::new();
+
+        let mut vec = transport_ends_vec.lock().await;
+        vec.retain(|ends| {
+        // Check if the transport ends are still active
+        if ends.is_active() {
+            // Only create and export the service if this node is the leader
+            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
+            let context = Context::with_initial_service_export(
+                Config::default_setup(),
+                ends.send.clone(),
+                ends.recv.clone(),
+                ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
+            );
+            contexts.push(context);
+            println!("Steganographer service started - this node is the leader");
+            } else {
+            println!("Steganographer service not started - this node is not the leader");
+            }
+            true
+        } else {
+            false
         }
+        });
+        drop(vec); // Release the lock before sleeping
+        
+        // loop {
+        //     let mut vec = transport_ends_vec.lock().await;
+        //     vec.retain(|ends| {
+        //     // Check if the transport ends are still active
+        //     if ends.is_active() {
+        //         // Only create and export the service if this node is the leader
+        //         if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
+        //         let context = Context::with_initial_service_export(
+        //             Config::default_setup(),
+        //             ends.send.clone(),
+        //             ends.recv.clone(),
+        //             ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
+        //         );
+        //         contexts.push(context);
+        //         println!("Steganographer service started - this node is the leader");
+        //         } else {
+        //         println!("Steganographer service not started - this node is not the leader");
+        //         }
+        //         true
+        //     } else {
+        //         false
+        //     }
+        //     });
+        //     drop(vec); // Release the lock before sleeping
+        //     let ctrl_c_timeout = Duration::from_secs(1);
+        //     match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
+        //         Ok(Ok(())) => {
+        //             break;
+        //         }
+        //         Ok(Err(e)) => {
+        //             println!("Error waiting for Ctrl+C: {}", e);
+        //         }
+        //         Err(_) => {
+        //             // Timeout occurred, continue the loop
+        //         }
+        //     }
+        //     let _steganographer = SomeImageSteganographer::new(90, 10);
+        //     tokio::time::sleep(Duration::from_secs(5)).await;
+        // }
 
         let _steganographer = SomeImageSteganographer::new(90, 10);
         
         // Wait for Ctrl-C
-        tokio::signal::ctrl_c().await.map_err(|e| Box::new(e) as Box<dyn Error + Send>)?;
-        println!("Shutting down server...");
+        tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
+        println!("Shutting down steg handle...");
 
-        Ok::<(), Box<dyn Error + Send>>(())
+        Ok::<(), String>(())
     });
 
     // Wait for Ctrl-C
@@ -101,7 +227,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Shutting down server...");
 
     // Await both handles to ensure clean shutdown
-    let _ = tokio::join!(node_handle, steg_handle);
+    let _ = tokio::join!(node_handle, steg_handle,connection_handle);
 
     Ok(())
 } 
