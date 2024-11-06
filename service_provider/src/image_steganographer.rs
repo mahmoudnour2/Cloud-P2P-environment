@@ -21,8 +21,6 @@ use stegano_core::{SteganoCore,SteganoEncoder, CodecOptions};
 
 
 
-
-
 #[remote_trait_object_macro::service]
 pub trait ImageSteganographer: Send + Sync {
     //fn new(&self, compression_quality: u8, max_pixel_diff: u8) -> Self;
@@ -53,7 +51,6 @@ impl ImageSteganographer for SomeImageSteganographer {
     fn encode(&self, secret_image: &[u8], output_path: &str) -> Result<Vec<u8>, String> {
         
         println!("Beginning Encoding");
-
         
         // Save the secret image to a temporary file
         let temp_secret_path = "/tmp/secret.jpg";
@@ -67,7 +64,9 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         // Load the carrier image
         //let carrier_path = "/home/magdeldin/Cloud-P2P-environment/service_provider/carrier.jpg";
+
         let carrier_path = "carrier.png";
+
         //let carrier = file_as_dynamic_image(carrier_path.to_string());
 
         // let carrier = if carrier_path.ends_with(".jpg") || carrier_path.ends_with(".jpeg") {
@@ -92,7 +91,9 @@ impl ImageSteganographer for SomeImageSteganographer {
         // save_image_buffer(encoded_buffer.clone(), output_path.to_string());
 
 
+
         // let encoded_image = DynamicImage::ImageRgba8(ImageBuffer::from_raw(encoded_buffer.width(), encoded_buffer.height(), encoded_buffer.into_vec()).unwrap());
+
 
         // encoded_image.save(output_path).unwrap();
         println!("Encoded image saved to {}", output_path);

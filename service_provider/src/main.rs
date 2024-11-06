@@ -20,6 +20,7 @@ pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
     // Setup Quinn endpoints for Node
     let server_addr: SocketAddr = "127.0.0.1:5016".parse()?;
     let client_addresses: Vec<SocketAddr> = vec![
@@ -42,15 +43,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok::<(), Box<dyn Error + Send>>(())
     });
 
-
+    // let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;
     println!("Quinn endpoints setup beginning.");
 
+
     let my_id = 3; // Make sure this matches your node ID
+
     let mut server_endpoints = Vec::new();
     for addr in server_addrs {
         let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
         server_endpoints.push(endpoint);
     }
+
     println!("Server endpoints created.");
 
     let mut transport_ends_vec = Vec::new();
@@ -58,6 +62,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let ends = create(endpoint).await?;
         transport_ends_vec.push(ends);
     }
+
     println!("Server endpoints created.");
 
     // Spawn the steganographer service task
@@ -91,6 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Wait for Ctrl-C
+
     tokio::signal::ctrl_c().await?;
     println!("Shutting down server...");
 
