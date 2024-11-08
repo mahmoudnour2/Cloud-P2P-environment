@@ -151,11 +151,11 @@ impl TransportEnds {
 
 
 // Create function now establishes Quinn connections
-pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, String> {
+pub async fn create(server_conn: Connection) -> Result<TransportEnds, String> {
     
     // Establish connections
     println!("Establishing connections...");
-    let server_conn = server_endpoint.accept().await.unwrap().await.map_err(|e| e.to_string())?;
+    //let server_conn = server_endpoint.accept().await.unwrap().await.map_err(|e| e.to_string())?;
     println!("Connections established successfully.");
 
     Ok(TransportEnds {
@@ -163,7 +163,7 @@ pub async fn create(server_endpoint: Endpoint) -> Result<TransportEnds, String> 
             connection: server_conn.clone(),
         },
         recv: QuinnRecv {
-            connection: server_conn,
+            connection: server_conn.clone(),
         },
     })
 }

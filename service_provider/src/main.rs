@@ -98,17 +98,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match timeout(Duration::from_secs(1), endpoint.accept()).await {
                     Ok(Some(incoming)) => {
                         if let Ok(conn) = incoming.await {
-                            if let Ok((send, mut recv)) = conn.accept_bi().await {
-                                let ends = match create(endpoint.clone()).await {
-                                    Ok(ends) => ends,
-                                    Err(e) => {
-                                        eprintln!("Failed to create transport ends: {}", e);
-                                        continue;
-                                    }
-                                };
-                                let mut vec = transport_ends_vec_clone.lock().await;
-                                vec.push(ends);
-                            }
+                            let ends = match create(conn).await {
+                                Ok(ends) => ends,
+                                Err(e) => {
+                                    eprintln!("Failed to create transport ends: {}", e);
+                                    continue;
+                                }
+                            };
+                            let mut vec = transport_ends_vec_clone.lock().await;
+                            vec.push(ends);
                         }
                     }
                     Ok(None) => {
@@ -148,71 +146,49 @@ async fn main() -> Result<(), Box<dyn Error>> {
         
         let mut contexts = Vec::new();
 
-        let mut vec = transport_ends_vec.lock().await;
-        vec.retain(|ends| {
-        // Check if the transport ends are still active
-        if ends.is_active() {
-            // Only create and export the service if this node is the leader
-            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
-            let context = Context::with_initial_service_export(
-                Config::default_setup(),
-                ends.send.clone(),
-                ends.recv.clone(),
-                ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-            );
-            contexts.push(context);
-            println!("Steganographer service started - this node is the leader");
-            } else {
-            println!("Steganographer service not started - this node is not the leader");
-            }
-            true
-        } else {
-            false
-        }
-        });
-        drop(vec); // Release the lock before sleeping
-        
-        // loop {
-        //     let mut vec = transport_ends_vec.lock().await;
-        //     vec.retain(|ends| {
-        //     // Check if the transport ends are still active
-        //     if ends.is_active() {
-        //         // Only create and export the service if this node is the leader
-        //         if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
-        //         let context = Context::with_initial_service_export(
-        //             Config::default_setup(),
-        //             ends.send.clone(),
-        //             ends.recv.clone(),
-        //             ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-        //         );
-        //         contexts.push(context);
-        //         println!("Steganographer service started - this node is the leader");
-        //         } else {
-        //         println!("Steganographer service not started - this node is not the leader");
-        //         }
-        //         true
-        //     } else {
-        //         false
-        //     }
-        //     });
-        //     drop(vec); // Release the lock before sleeping
-        //     let ctrl_c_timeout = Duration::from_secs(1);
-        //     match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
-        //         Ok(Ok(())) => {
-        //             break;
-        //         }
-        //         Ok(Err(e)) => {
-        //             println!("Error waiting for Ctrl+C: {}", e);
-        //         }
-        //         Err(_) => {
-        //             // Timeout occurred, continue the loop
-        //         }
-        //     }
-        //     let _steganographer = SomeImageSteganographer::new(90, 10);
-        //     tokio::time::sleep(Duration::from_secs(5)).await;
-        // }
-
         let _steganographer = SomeImageSteganographer::new(90, 10);
+        
+        loop {
+            let mut vec = transport_ends_vec.lock().await;
+            vec.retain(|ends| {
+            // Check if the transport ends are still active
+            if ends.is_active() {
+                // Only create and export the service if this node is the leader
+                if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
+                let context = Context::with_initial_service_export(
+                    Config::default_setup(),
+                    ends.send.clone(),
+                    ends.recv.clone(),
+                    ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
+                );
+                contexts.push(context);
+                println!("Steganographer service started - this node is the leader");
+                } else {
+                println!("Steganographer service not started - this node is not the leader");
+                }
+                true
+            } else {
+                false
+            }
+            });
+            drop(vec); // Release the lock before sleeping
+            let ctrl_c_timeout = Duration::from_secs(1);
+            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
+                Ok(Ok(())) => {
+                    break;
+                }
+                Ok(Err(e)) => {
+                    println!("Error waiting for Ctrl+C: {}", e);
+                }
+                Err(_) => {
+                    // Timeout occurred, continue the loop
+                }
+            }
+            //let _steganographer = SomeImageSteganographer::new(90, 10);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        
         
         // Wait for Ctrl-C
         tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
