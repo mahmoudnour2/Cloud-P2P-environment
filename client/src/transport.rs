@@ -144,6 +144,7 @@ impl Terminate for QuinnTerminator {
 }
 
 // Modified TransportEnds for Quinn
+#[derive(Debug, Clone)]
 pub struct TransportEnds {
     pub send: QuinnSend,
     pub recv: QuinnRecv,
