@@ -81,15 +81,15 @@ impl Node {
         server_addr: SocketAddr,
         peer_addrs: Vec<SocketAddr>,
     ) -> Result<Self> {
-        println!("Setting up server endpoint on {}", server_addr);
+       // println!("Setting up server endpoint on {}", server_addr);
         let (server_endpoint, _cert) = make_server_endpoint(server_addr).map_err(|e| anyhow::anyhow!(e))?;
         
-        println!("Setting up client endpoints for {} peers", peer_addrs.len());
+       //println!("Setting up client endpoints for {} peers", peer_addrs.len());
         let mut client_endpoints = Vec::new();
         for peer_addr in peer_addrs {
-            println!("Setting up client endpoint for peer {}", peer_addr);
+           // println!("Setting up client endpoint for peer {}", peer_addr);
             let mut client_endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
-            println!("Client endpoint created for peer {}", peer_addr);
+            //println!("Client endpoint created for peer {}", peer_addr);
             
             let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
                 rustls::ClientConfig::builder()
@@ -102,7 +102,7 @@ impl Node {
             transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
             client_config.transport_config(Arc::new(transport_config));
             client_endpoint.set_default_client_config(client_config);
-            println!("Client config set for peer {}", peer_addr);
+            //println!("Client config set for peer {}", peer_addr);
             client_endpoints.push((peer_addr, client_endpoint));
         }
 
@@ -203,21 +203,21 @@ impl Node {
                 self.state = State::DefactoLeader;
                 return;
             }
-            println!("Listening!!!");
+            //println!("Listening!!!");
             
             match timeout(Duration::from_millis(100), self.server_endpoint.accept()).await {
                 Ok(Some(incoming)) => {
                     if let Ok(conn) = incoming.await {
                         println!("{}", conn.remote_address());
                         if let Ok((send, mut recv)) = conn.accept_bi().await {
-                            println!("Connection Accepted");
+                           //println!("Connection Accepted");
                             
                             if let Ok(msg_bytes) = recv.read_to_end(64 * 1024).await {
-                                println!("Message Received");
-                                println!("Message length: {}", msg_bytes.len());
+                               // println!("Message Received");
+                                //println!("Message length: {}", msg_bytes.len());
                                 
                                 if let Ok(msg) = bincode::deserialize::<NodeMessage>(&msg_bytes) {
-                                    println!("Begin Message Decoding");
+                                   // println!("Begin Message Decoding");
                                     match msg {
                                         NodeMessage::Heartbeat { leader_id, metrics: leader_metrics, candidates } => {
                                             println!("Node {} received heartbeat from leader {}", self.id, leader_id);
@@ -257,7 +257,7 @@ impl Node {
                     // No incoming connection within the timeout duration
                 }
                 Err(_) => {
-                    println!("Timeout occurred while waiting for incoming connections");
+                    //println!("Timeout occurred while waiting for incoming connections");
                 }
             }
             
@@ -395,7 +395,7 @@ impl Node {
             let peer_addr = *peer_addr;
 
             let task = tokio::task::spawn(async move {
-                println!("Establishing connection to {}", peer_addr);
+                //println!("Establishing connection to {}", peer_addr);
                 
                 let result: Result<(), anyhow::Error> = async {
                     let conn = client_endpoint.connect(
@@ -404,20 +404,20 @@ impl Node {
                     ).unwrap()
                     .await
                     .unwrap();
-                    println!("[client] connected: addr={}", conn.remote_address());
+                    //println!("[client] connected: addr={}", conn.remote_address());
 
                     if let Ok((mut send, _recv)) = conn.open_bi().await {
-                        println!("Sending message to {}", peer_addr);
+                        //println!("Sending message to {}", peer_addr);
                         let _ = send.write_all(&msg_bytes).await; 
-                        println!("wrote mesagge");
+                        //println!("wrote mesagge");
                         let _ = send.finish();
-                        println!("finished mesaggess");
+                        //println!("finished mesaggess");
                         sleep(Duration::from_millis(50)).await;
                     }
                     Ok(())
                 }.await;
 
-                println!("Message sent to {}", peer_addr);
+                //println!("Message sent to {}", peer_addr);
 
                 if let Err(e) = result {
                     println!("Error sending message to {}: {}", peer_addr, e);
@@ -426,11 +426,10 @@ impl Node {
 
             let random_timeout = Duration::from_millis(200 + rand::thread_rng().gen_range(0..100));
             let task = tokio::time::timeout(random_timeout, task);
-
             let task = async {
                 match task.await {
                     Ok(_) => (),
-                    Err(_) => println!("Timeout occurred while sending message"),
+                    Err(_) => (),
                 }
             };
 
