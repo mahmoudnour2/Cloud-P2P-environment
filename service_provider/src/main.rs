@@ -1,4 +1,5 @@
 use quinn::{Endpoint, ServerConfig, TransportConfig, ClientConfig};
+use rand::seq::index;
 use std::error::Error;
 use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, ServiceToExport, Config};
@@ -17,6 +18,7 @@ use quinn_proto::crypto::rustls::QuicClientConfig;
 use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
 use futures::{FutureExt, StreamExt};
 use tokio::time::{timeout, Duration};
+use tokio::task::spawn_blocking;
 use tokio::sync::Mutex;
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
@@ -138,17 +140,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok::<(), String>(())
     });
 
+
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let contexts_clone: Arc<Mutex<Vec<Context>>> = Arc::clone(&contexts);
+    
+
     // Spawn the steganographer service task
     let steg_handle = tokio::spawn(async move {
         
 
         
         
-        let mut contexts = Vec::new();
+        
 
         let _steganographer = SomeImageSteganographer::new(90, 10);
         
+        
         loop {
+            //let mut contexts = contexts_clone.clone();
+            let mut contexts = contexts.lock().await;
             let mut vec = transport_ends_vec.lock().await;
             vec.retain(|ends| {
             // Check if the transport ends are still active
@@ -162,6 +172,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
                     );
                     contexts.push(context);
+                    let index = contexts.len() - 1;
+
+                    let contexts_clone = contexts_clone.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(300)).await; // 5 minutes
+                        let mut contexts = contexts_clone.lock().await;
+                        contexts.remove(index);
+                        println!("Context shut down after 5 minutes");
+                    });
+                    
                     println!("Steganographer service started - this node is the leader");
                     } else {
                     println!("Steganographer service not started - this node is not the leader");
@@ -173,6 +193,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
             drop(vec); // Release the lock before sleeping
+
             let ctrl_c_timeout = Duration::from_secs(1);
             match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
                 Ok(Ok(())) => {
