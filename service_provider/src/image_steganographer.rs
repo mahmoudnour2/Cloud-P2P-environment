@@ -10,6 +10,7 @@ use serde;
 use serde_json;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use tracing_subscriber::fmt::format;
 use std::collections::HashMap;
 use std::{env, thread};
 
@@ -24,7 +25,7 @@ use stegano_core::{SteganoCore,SteganoEncoder, CodecOptions};
 #[remote_trait_object_macro::service]
 pub trait ImageSteganographer: Send + Sync {
     //fn new(&self, compression_quality: u8, max_pixel_diff: u8) -> Self;
-    fn encode(&self, secret_image: &[u8], output_path: &str) -> Result<Vec<u8>, String>;
+    fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str) -> Result<Vec<u8>, String>;
     fn decode(&self, encoded_image: &[u8], decoded_image_path: &str, file_name: &str) -> Result<Vec<u8>, String>;
 }
 impl Service for dyn ImageSteganographer {}
@@ -48,13 +49,13 @@ impl SomeImageSteganographer {
 impl ImageSteganographer for SomeImageSteganographer {
 
 
-    fn encode(&self, secret_image: &[u8], output_path: &str) -> Result<Vec<u8>, String> {
+    fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str) -> Result<Vec<u8>, String> {
         
         println!("Beginning Encoding");
         
         // Save the secret image to a temporary file
-        let temp_secret_path = "/tmp/secret.jpg";
-        let mut temp_secret_file = File::create(temp_secret_path).map_err(|e| e.to_string())?;
+        let temp_secret_path = format!("/tmp/{}",file_name);
+        let mut temp_secret_file = File::create(&temp_secret_path).map_err(|e| e.to_string())?;
         temp_secret_file.write_all(secret_image).map_err(|e| e.to_string())?;
         temp_secret_file.flush().map_err(|e| e.to_string())?;
 
@@ -104,7 +105,7 @@ impl ImageSteganographer for SomeImageSteganographer {
         let mut buffer = Vec::new();
         encoded_image.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
         // Delete the temporary secret image file
-        //std::fs::remove_file(temp_secret_path).map_err(|e| e.to_string())?;
+        std::fs::remove_file(&temp_secret_path).map_err(|e| e.to_string())?;
         println!("Buffer length: {}", buffer.len());
         
         Ok(buffer)
@@ -137,8 +138,7 @@ impl ImageSteganographer for SomeImageSteganographer {
         
         let mut buffer = Vec::new();
         decoded_image.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
-        // Delete the temporary encoded image file
-        std::fs::remove_file(temp_enc_path).map_err(|e| e.to_string())?;
+        std::fs::remove_file(&temp_enc_path).map_err(|e| e.to_string())?;
         Ok(buffer)
     }
 }

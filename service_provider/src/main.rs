@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Quin node is beginning setup");
 
-    let mut quinn_node = Node::new(3, server_addr, client_addresses).await?;
+    let mut quinn_node = Node::new(2, server_addr_leader_election, peer_servers_leader_election).await?;
     // Spawn the Node task
     let node_handle = tokio::spawn(async move {
         quinn_node.run().await;
