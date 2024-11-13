@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::error::Error;
 use std::thread;
 use tokio::runtime::Runtime;
+use std::hash::{Hash, Hasher};
 
 // Custom transport error types
 #[derive(Debug)]
@@ -131,7 +132,21 @@ pub struct TransportEnds {
     pub send: QuinnSend,
     pub recv: QuinnRecv,
 }
+impl PartialEq for TransportEnds {
+    fn eq(&self, other: &Self) -> bool {
+        self.send.connection.stable_id() == other.send.connection.stable_id() &&
+        self.recv.connection.stable_id() == other.recv.connection.stable_id()
+    }
+}
 
+impl Eq for TransportEnds {}
+
+impl Hash for TransportEnds {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.send.connection.stable_id().hash(state);
+        self.recv.connection.stable_id().hash(state);
+    }
+}
 impl TransportEnds {
 
     pub fn is_active(&self) -> bool {
@@ -147,6 +162,13 @@ impl TransportEnds {
         }
 
     }
+    pub fn get_connection_id(&self) -> String{
+        format!("{}", self.send.connection.stable_id())
+    }
+    pub fn get_remote_address(&self) -> String{
+        format!("{}", self.send.connection.remote_address())
+    }
+
 
 }
 

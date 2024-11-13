@@ -20,6 +20,7 @@ use futures::{FutureExt, StreamExt};
 use tokio::time::{timeout, Duration};
 use tokio::task::spawn_blocking;
 use tokio::sync::Mutex;
+use std::collections::HashMap;
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -27,18 +28,17 @@ pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints for Node
-    let server_addr: SocketAddr = "10.7.16.71:5016".parse()?;
+    let server_addr: SocketAddr = "127.0.0.1:5016".parse()?;
     let client_addresses: Vec<SocketAddr> = vec![
-        "10.7.19.117:5016".parse()?,
-        "10.7.16.154:5016".parse()?,
+        // "127.0.0.1:5010".parse()?,
     ];
 
     // Setup Quinn endpoints for steganographer
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.71:5017".parse()?,
+        "127.0.0.1:5011".parse()?,
     ];
 
-    println!("Server endpoints created.");
+    println!("Quin node is beginning setup");
 
     let mut quinn_node = Node::new(3, server_addr, client_addresses).await?;
     // Spawn the Node task
@@ -49,56 +49,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok::<(), Box<dyn Error + Send>>(())
     });
 
-    // let server_addr: SocketAddr = "127.0.0.1:5000".parse()?;
-    println!("Quinn endpoints setup beginning.");
-
-
     let my_id = 3; // Make sure this matches your node ID
 
+    
     let mut server_endpoints = Vec::new();
     for addr in server_addrs {
         let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
         server_endpoints.push(endpoint);
     }
-
-    println!("Server endpoints created.");
-    //let mut transport_ends_vec = Vec::new();
-    //loop{}
-    // for endpoint in &server_endpoints {
-    //     match timeout(Duration::from_secs(1), endpoint.accept()).await {
-    //         Ok(Some(incoming)) => {
-    //             if let Ok(conn) = incoming.await {
-    //                 if let Ok((send, mut recv)) = conn.accept_bi().await {
-    //                     let ends = create(endpoint.clone()).await?;
-    //                     transport_ends_vec.push(ends);
-    //                 }
-    //             }
-    //         }
-    //         Ok(None) => {
-    //             // No incoming connection within the timeout duration
-    //         }
-    //         Err(_) => {
-    //             //println!("Leader timed out waiting for boradcasting heartbeat");
-    //             ();
-    //         }
-    //     }
-    // }
-    // let mut transport_ends_vec = Vec::new();
-    // for endpoint in server_endpoints {
-    //     let ends = create(endpoint).await?;
-    //     transport_ends_vec.push(ends);
-    // }
+    println!("Steganography service endpoints are setup");
 
     let transport_ends_vec = Arc::new(Mutex::new(Vec::new()));
     let transport_ends_vec_clone = Arc::clone(&transport_ends_vec);
 
-    println!("Server endpoints created.");
-
     let connection_handle = tokio::spawn(async move {
         loop {
+            // Check if this node is the current leader
+            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
             for endpoint in &server_endpoints {
                 match timeout(Duration::from_secs(1), endpoint.accept()).await {
                     Ok(Some(incoming)) => {
+                        println!("Received a connection request from client");
+                        //incoming.await accepts the connection
                         if let Ok(conn) = incoming.await {
                             let ends = match create(conn).await {
                                 Ok(ends) => ends,
@@ -112,10 +87,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                     Ok(None) => {
+                        println!("Server endpoint has stopped accepting new connections");
                         // No incoming connection within the timeout duration
                     }
                     Err(_) => {
-                        // Handle timeout error
+                        println!("No incoming connection within the timeout duration");
                     }
                 }
             }
@@ -141,55 +117,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
 
-    let contexts = Arc::new(Mutex::new(Vec::new()));
-    let contexts_clone: Arc<Mutex<Vec<Context>>> = Arc::clone(&contexts);
-    
+    let contexts: Arc<Mutex<HashMap<TransportEnds, Context>>> = Arc::new(Mutex::new(HashMap::new()));
 
     // Spawn the steganographer service task
     let steg_handle = tokio::spawn(async move {
         
-
-        
-        
-        
-
-        let _steganographer = SomeImageSteganographer::new(90, 10);
-        
-        
         loop {
-            //let mut contexts = contexts_clone.clone();
             let mut contexts = contexts.lock().await;
+            println!("{}",contexts.len());
             let mut vec = transport_ends_vec.lock().await;
             vec.retain(|ends| {
-            // Check if the transport ends are still active
                 if ends.is_active() {
-                    // Only create and export the service if this node is the leader
                     if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
-                    let context = Context::with_initial_service_export(
-                        Config::default_setup(),
-                        ends.send.clone(),
-                        ends.recv.clone(),
-                        ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-                    );
-                    contexts.push(context);
-                    let index = contexts.len() - 1;
-
-                    let contexts_clone = contexts_clone.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(300)).await; // 5 minutes
-                        let mut contexts = contexts_clone.lock().await;
-                        contexts.remove(index);
-                        println!("Context shut down after 5 minutes");
-                    });
-                    
-                    println!("Steganographer service started - this node is the leader");
+                        // Only create and export the service if this node is the leader and the context doesn’t already exist
+                        if !contexts.contains_key(ends) {
+                            let context = Context::with_initial_service_export(
+                                Config::default_setup(),
+                                ends.send.clone(),
+                                ends.recv.clone(),
+                                ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
+                            );
+                            contexts.insert(ends.clone(), context);
+                            println!("Steganographer service started for client {:?}", ends.get_remote_address());
+                        }
                     } else {
-                    println!("Steganographer service not started - this node is not the leader");
+                        println!("This node is not the leader; no new context created.");
                     }
                     true
                 } else {
+                    // Remove context if the connection is no longer active
+                    if contexts.remove(ends).is_some() {
+                        println!("Context removed for inactive connection {:?}", ends);
+                    }
                     false
-                    
                 }
             });
             drop(vec); // Release the lock before sleeping
@@ -206,12 +166,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // Timeout occurred, continue the loop
                 }
             }
-            //let _steganographer = SomeImageSteganographer::new(90, 10);
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
 
-        
-        
         // Wait for Ctrl-C
         tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
         println!("Shutting down steg handle...");

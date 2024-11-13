@@ -21,15 +21,9 @@ use tokio::time::timeout;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-
-
-
-
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "127.0.0.1:5000".parse()?,
-        //"127.0.0.1:5002".parse()?,
-        //"127.0.0.1:5050".parse()?
+        "127.0.0.1:5011".parse()?,
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "127.0.0.1:4800".parse()?;  // Listen on this port
 
@@ -56,42 +50,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create transport ends
     println!("Creating transport ends.");
-
-
-
-
-    // // Create transport ends
-    // println!("Creating transport ends.");
-    // let mut transport_ends_vec = Vec::new();
-    // for address in server_addrs.clone() {
-    //     let ends = create(client_endpoint.clone(),address).await?;
-    //     transport_ends_vec.push(ends);
-    // }
-    // println!("Transport ends created successfully.");
-
-    // let mut context_vector = Vec::new();
-    // let mut image_steganographer_proxy_vector = Vec::new();
-
-    
-    // // Process each transport end
-    // for (index, transport_end) in transport_ends_vec.iter().enumerate() {
-    //     println!("Processing transport end {}", index);
-        
-    //     // Create RTO context
-    //     println!("Creating RTO context for endpoint {}", index);
-    //     let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
-    //         Context::with_initial_service_import(Config::default_setup(), transport_end.send.clone(), transport_end.recv.clone());
-        
-    //     //image_steganographer_vector.push(image_steganographer);
-    //     let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-    //     context_vector.push(context_user);
-        
-    //     image_steganographer_proxy_vector.push(image_steganographer_proxy);
-
-    //     println!("RTO context created successfully for endpoint {}", index);
-
-        
-    // }
 
 
 
@@ -167,11 +125,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-            
-
-
-
-            
+           
             
             println!("Decode method invoked successfully for secret image {}", index);
         }
