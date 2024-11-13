@@ -401,9 +401,8 @@ impl Node {
                     let conn = client_endpoint.connect(
                         peer_addr,
                         "localhost",
-                    ).unwrap()
-                    .await
-                    .unwrap();
+                    )?
+                    .await?;
                     //println!("[client] connected: addr={}", conn.remote_address());
 
                     if let Ok((mut send, _recv)) = conn.open_bi().await {
