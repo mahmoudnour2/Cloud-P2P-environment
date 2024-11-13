@@ -146,9 +146,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
                             let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
                             println!("Encoding secret image {} with proxy", index);
-                            let stegano = image_steganographer_proxy.encode(&secret_image_bytes, &stego_path);
-                            let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-                            let _finale = local_steganogragrapher.decode(&stegano.unwrap(), &finale_path, &secret_file_name).unwrap();
+                            let stegano = image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name);
+                            match stegano {
+                                Ok(stegano_vec) => {
+                                    println!("Secret image {} encoded successfully", index);
+                                    let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
+                                    let _finale = local_steganogragrapher.decode(&stegano_vec, &finale_path, &secret_file_name).unwrap();
+
+                                },
+                                Err(e) => {
+                                    println!("Error encoding secret image {}: {}", index, e);
+                                }
+                            }
+                            
                         
                     });
                     handles.push(handle);
@@ -174,10 +184,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             
             
             println!("Decode method invoked successfully for secret image {}", index);
-        }
-
-        for i in 0..10 {
-            
         }
         println!("Shutting down steg handle...");
 

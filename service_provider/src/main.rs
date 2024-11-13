@@ -27,20 +27,20 @@ pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints for Node
-    let server_addr: SocketAddr = "10.7.16.71:5016".parse()?;
-    let client_addresses: Vec<SocketAddr> = vec![
-        "10.7.19.117:5016".parse()?,
+    let server_addr_leader_election: SocketAddr = "10.7.19.117:5016".parse()?;
+    let peer_servers_leader_election: Vec<SocketAddr> = vec![
+        "10.7.16.71:5016".parse()?,
         "10.7.16.154:5016".parse()?,
     ];
 
     // Setup Quinn endpoints for steganographer
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.71:5017".parse()?,
+        "10.7.19.117:5017".parse()?,
     ];
 
     println!("Server endpoints created.");
 
-    let mut quinn_node = Node::new(3, server_addr, client_addresses).await?;
+    let mut quinn_node = Node::new(2, server_addr_leader_election, peer_servers_leader_election).await?;
     // Spawn the Node task
     let node_handle = tokio::spawn(async move {
         quinn_node.run().await;
@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Quinn endpoints setup beginning.");
 
 
-    let my_id = 3; // Make sure this matches your node ID
+    let my_id = 2; // Make sure this matches your node ID
 
     let mut server_endpoints = Vec::new();
     for addr in server_addrs {
