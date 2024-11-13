@@ -28,8 +28,8 @@ pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints for Node
-    let server_addr: SocketAddr = "127.0.0.1:5016".parse()?;
-    let client_addresses: Vec<SocketAddr> = vec![
+    let server_addr_leader_election: SocketAddr = "127.0.0.1:5016".parse()?;
+    let peer_servers_leader_election: Vec<SocketAddr> = vec![
         // "127.0.0.1:5010".parse()?,
     ];
 
@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // No incoming connection within the timeout duration
                     }
                     Err(_) => {
-                        println!("No incoming connection within the timeout duration");
+                        // println!("No incoming connection within the timeout duration");
                     }
                 }
             }
