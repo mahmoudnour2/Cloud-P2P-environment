@@ -39,21 +39,6 @@ impl TransportSend for QuinnSend {
         timeout: Option<std::time::Duration>,
     ) -> Result<(), TransportError> {
         let data = data.to_vec();
-        /*
-        let connection = self.connection.clone();
-        let result = thread::spawn(move || {
-            futures::executor::block_on(async {
-                let (mut send, _recv) = connection.open_bi().await
-                    .map_err(|_| TransportError::Custom)?;
-                
-                send.write_all(&data).await
-                    .map_err(|_| TransportError::Custom)?;
-                
-                send.finish()
-                    .map_err(|_| TransportError::Custom)
-            })
-        }).join().expect("Thread panicked");
-        */
         
         let data = data.to_vec();
         let connection = self.connection.clone();
@@ -101,23 +86,6 @@ pub struct QuinnRecv {
 impl TransportRecv for QuinnRecv {
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, TransportError> {
         
-        /*
-        let connection = self.connection.clone();
-        
-        let result:Result<Vec<u8>, TransportError> = thread::spawn(move || {
-            futures::executor::block_on(async {
-                let (_, mut recv) = connection.accept_bi().await
-                    .map_err(|_| TransportError::Custom)?;
-                
-                let mut buffer = Vec::new();
-                let max_size = 30*1024 * 1024; // 30MB max size, adjust as needed
-                buffer = recv.read_to_end(max_size).await
-                    .map_err(|_| TransportError::Custom)?;
-                
-                Ok(buffer)
-            })
-        }).join().expect("Thread panicked");
-        */
 
         let connection = self.connection.clone();
         let result = thread::spawn(move || {
@@ -179,14 +147,52 @@ pub async fn create(client_endpoint: Endpoint, server_address: SocketAddr) -> Re
         "localhost",
     ).map_err(|e| e.to_string())?
     .await.map_err(|e| e.to_string())?;
+    
+
+    // Receive the server's IP address
+
+    let server_address = match client_conn.accept_bi().await {
+        Ok((_, mut recv)) => {
+    
+            let mut buffer = Vec::new();
+            let max_size = 500 * 1024 * 1024; // 500MB max size, adjust as needed
+            buffer = recv.read_to_end(max_size).await
+                .map_err(|e| {
+                    eprintln!("Error reading data: {:?}", e);
+                    e.to_string()
+                })?;
+
+            let server_ip = String::from_utf8(buffer).map_err(|e| e.to_string())?;
+            println!("Received server IP address: {}", server_ip);
+            let server_address: SocketAddr = server_ip.parse::<SocketAddr>().map_err(|e| e.to_string())?;
+            Ok(server_address)
+        },
+        Err(e) => {
+            eprintln!("Error accepting stream: {:?}", e);
+            Err(e.to_string())
+        }
+    };
+
+    let server_address = server_address?;
+
+
+    
+    
+
+    // Establish new connection using the received IP address
+    let new_client_conn = client_endpoint.connect(
+        server_address,
+        "localhost",
+    ).map_err(|e| e.to_string())?
+    .await.map_err(|e| e.to_string())?;
     println!("Connections established successfully.");
 
     Ok(TransportEnds {
         send: QuinnSend {
-            connection: client_conn.clone(),
+            connection: new_client_conn.clone(),
         },
         recv: QuinnRecv {
-            connection: client_conn.clone(),
+            connection: new_client_conn.clone(),
         },
     })
 }

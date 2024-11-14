@@ -3,12 +3,15 @@ use remote_trait_object::transport::*;
 use log::debug;
 use quinn::{Endpoint, ClientConfig, ServerConfig, Connection, SendStream, RecvStream};
 use futures::executor;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::error::Error;
 use std::thread;
 use tokio::runtime::Runtime;
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
+use crate::quinn_utils::*;
+use local_ip_address::local_ip;
 
 // Custom transport error types
 #[derive(Debug)]
@@ -215,14 +218,49 @@ pub async fn create(server_conn: Connection) -> Result<TransportEnds, String> {
     // Establish connections
     println!("Establishing connections...");
     //let server_conn = server_endpoint.accept().await.unwrap().await.map_err(|e| e.to_string())?;
+    let local_ip: IpAddr = local_ip().unwrap();
+    let local_addr = SocketAddr::new(local_ip, 0);
+
+    let socket = UdpSocket::bind(local_addr).map_err(|e| e.to_string())?;
+    let actual_addr = socket.local_addr().map_err(|e| e.to_string())?;
+    println!("Assigned port: {}", actual_addr.port());
+    std::mem::drop(socket);
+
+    let addr = format!("{}", actual_addr);
+    println!("Sending address: {}", addr);
+    match server_conn.open_bi().await {
+        Ok((mut send, _recv)) => {
+    
+            send.write_all(addr.as_bytes()).await
+                .map_err(|e| {
+                    eprintln!("Error writing data: {:?}", e);
+                    e.to_string()
+                })?;
+            
+            send.finish()
+                .map_err(|e| {
+                    eprintln!("Error finishing stream: {:?}", e);
+                    e.to_string()
+                })?;
+        },
+        Err(e) => {
+            eprintln!("Error opening stream: {:?}", e);
+            return Err(e.to_string());
+        }
+    };
+
+    let (endpoint, _cert) = make_server_endpoint(actual_addr).unwrap();
+    let new_conn = endpoint.accept().await.unwrap().await.map_err(|e| e.to_string())?;
+
     println!("Connections established successfully.");
 
     Ok(TransportEnds {
         send: QuinnSend {
-            connection: server_conn.clone(),
+            connection: new_conn.clone(),
         },
         recv: QuinnRecv {
-            connection: server_conn.clone(),
+            connection: new_conn.clone(),
         },
     })
+
 }
