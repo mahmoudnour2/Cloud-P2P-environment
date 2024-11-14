@@ -28,14 +28,15 @@ pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints for Node
-    let server_addr_leader_election: SocketAddr = "127.0.0.1:5016".parse()?;
+    let server_addr_leader_election: SocketAddr = "10.7.19.117:5016".parse()?;
     let peer_servers_leader_election: Vec<SocketAddr> = vec![
-        // "127.0.0.1:5010".parse()?,
+        "10.7.16.154:5016".parse()?,
+        "10.7.16.71:5016".parse()?,
     ];
 
     // Setup Quinn endpoints for steganographer
     let server_addrs: Vec<SocketAddr> = vec![
-        "127.0.0.1:5011".parse()?,
+        "10.7.19.117:5017".parse()?,
     ];
 
     println!("Quin node is beginning setup");
