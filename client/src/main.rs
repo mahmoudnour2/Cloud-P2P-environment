@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, Config, ServiceToImport};
 use std::sync::Arc;
 use std::time::Duration;
+use std::panic::AssertUnwindSafe;
 
 mod transport;
 mod image_steganographer;
@@ -24,8 +25,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
         "10.7.19.117:5017".parse()?,
-        "10.7.16.154:5017".parse()?,
-        "10.7.16.71:5017".parse()?,
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "10.7.17.170:4800".parse()?;  // Listen on this port
 
@@ -109,55 +108,77 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let mut handles = vec![];
         
                 for addr in server_addrs.clone() {
-                let ends = match create(client_endpoint.clone(), addr).await {
-                    Ok(ends) => ends,
-                    Err(e) => {
-                    println!("Error creating transport ends: {}", e);
-                    continue;
-                    }
-                };
-        
-                let secret_image_bytes = secret_image_bytes.clone();
-                let stego_path = stego_path.clone();
-                let finale_path = finale_path.clone();
-                let secret_file_name = secret_file_name.clone();
-        
-                let handle = tokio::spawn(async move {
-                    let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
-                        Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
-                    let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-                    println!("Encoding secret image {} with proxy", index);
-                    let stegano = image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name);
-                    match stegano {
-                    Ok(stegano_vec) => {
-                        println!("Secret image {} encoded successfully", index);
-                        // let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-                        // match local_steganogragrapher.decode(&stegano_vec, &finale_path, &secret_file_name) {
-                        // Ok(_) => Ok(()),
-                        // Err(e) => Err(format!("Failed to decode: {}", e))
-                        // }
-                        Ok(())
-                    },
-                    Err(e) => Err(format!("Error encoding secret image: {}", e))
-                    }
-                });
-                handles.push(handle);
+                    let ends = match create(client_endpoint.clone(), addr).await {
+                        Ok(ends) => ends,
+                        Err(e) => {
+                        println!("Error creating transport ends: {}", e);
+                        continue;
+                        }
+                    };
+            
+                    let secret_image_bytes = secret_image_bytes.clone();
+                    let stego_path = stego_path.clone();
+                    let finale_path = finale_path.clone();
+                    let secret_file_name = secret_file_name.clone();
+            
+                    let handle = tokio::spawn(async move {
+                        let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
+                            Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
+                        context_user.disable_garbage_collection();
+                        let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
+                        println!("Encoding secret image {} with proxy", index);
+                        let stegano = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                            // match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
+                            //     Ok(encoded_bytes) => Ok(encoded_bytes),
+                            //     Err(e) => {
+                            //         println!("Error during encoding: {:?}", e);
+                            //         Err(e)
+                            //     }
+                            // }
+
+                            match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
+                                Ok(encoded_bytes) => {
+                                    // Save the encoded image to a file
+                                    let output_path = format!("stego_{}", secret_file_name);
+                                    std::fs::write(&output_path, &encoded_bytes)
+                                        .map_err(|e| format!("Failed to save encoded image: {}", e))?;
+                                    Ok(encoded_bytes)
+                                },
+                                Err(e) => Err(e)
+                            }
+                        })).unwrap_or_else(|e| {
+                            println!("Connection error occurred: {:?}", e);
+                            drop(image_steganographer_proxy);
+                            drop(context_user);
+                            drop(ends);
+                            Err("Connection lost during encoding".to_string())
+                        });
+                        
+                        // Handle the result
+                        match stegano {
+                            Ok(_) => println!("Encoding completed successfully"),
+                            Err(e) => {
+                                println!("Failed to encode: {:?}", e);
+                                // context_user_clone.clear_service_registry();
+                                // drop(context_user_clone);
+                                // drop(image_steganographer_proxy_clone);
+                            }
+                        }
+                    });
+                    handles.push(handle);
                 }
         
                 let results: Vec<_> = futures::future::join_all(handles).await;
                 for result in results {
-                match result {
-                    Ok(Ok(())) => {
-                    println!("Secret image {} processed successfully", index);
-                    success = true;
-                    },
-                    Ok(Err(e)) => {
-                    println!("Error in steganography: {}", e);
-                    },
-                    Err(e) => {
-                    println!("Error in task: {}", e);
+                    match result {
+                        Ok(_) => {
+                            println!("Secret image {} processed successfully", index);
+                            success = true;
+                        },
+                        Err(e) => {
+                            println!("Error in task: {}", e);
+                        }
                     }
-                }
                 }
             }
             

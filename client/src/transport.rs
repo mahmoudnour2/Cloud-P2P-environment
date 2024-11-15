@@ -1,13 +1,16 @@
 use crossbeam::channel::{bounded, Receiver, Select, SelectTimeoutError, Sender};
 use remote_trait_object::transport::*;
 use log::debug;
-use quinn::{Endpoint, ClientConfig, ServerConfig, Connection, SendStream, RecvStream};
+use quinn::{Endpoint, ClientConfig, ServerConfig, Connection, SendStream, RecvStream, TransportConfig};
 use futures::executor;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use std::error::Error;
 use std::thread;
 use tokio::runtime::Runtime;
+use quinn_proto::crypto::rustls::QuicClientConfig;
+use crate::quinn_utils::SkipServerVerification;
 
 // Custom transport error types
 #[derive(Debug)]
@@ -66,7 +69,7 @@ impl TransportSend for QuinnSend {
                     }
                 }
             })
-        }).join().expect("Thread panicked");
+        }).join().map_err(|_| TransportError::Custom)?;
 
         result
     }
@@ -106,11 +109,13 @@ impl TransportRecv for QuinnRecv {
                     },
                     Err(e) => {
                         eprintln!("Error accepting stream: {:?}", e);
+                        // Close the connection and drop the used port
+                        connection.close(0u32.into(), b"connection error");
                         Err(TransportError::Custom)
                     }
                 }
             })
-        }).join().expect("Thread panicked");
+        }).join().map_err(|_| TransportError::Custom)?;
 
         result
     }
@@ -180,7 +185,23 @@ pub async fn create(client_endpoint: Endpoint, server_address: SocketAddr) -> Re
     
 
     // Establish new connection using the received IP address
-    let new_client_conn = client_endpoint.connect(
+    let new_client_addr: SocketAddr = "0.0.0.0:0".parse::<SocketAddr>().map_err(|e| e.to_string())?;  // Listen on this port
+
+    let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(SkipServerVerification::new())
+            .with_no_client_auth(),
+    ).map_err(|e| e.to_string())?));
+    let mut transport_config = TransportConfig::default();
+    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
+    client_config.transport_config(Arc::new(transport_config));
+
+    let mut new_client_endpoint = quinn::Endpoint::client(new_client_addr).map_err(|e| e.to_string())?;
+    new_client_endpoint.set_default_client_config(client_config);
+
+
+    let new_client_conn = new_client_endpoint.connect(
         server_address,
         "localhost",
     ).map_err(|e| e.to_string())?
