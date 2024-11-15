@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::error::Error;
 use std::thread;
 use tokio::runtime::Runtime;
+use std::time::Instant;
 
 // Custom transport error types
 #[derive(Debug)]
@@ -30,7 +31,11 @@ pub struct QuinnSend {
     connection: Connection,
     //runtime: Arc<Runtime>,
 }
-
+impl QuinnSend {
+    pub fn connection(&self) -> &Connection {
+        &self.connection
+    }
+}
 
 impl TransportSend for QuinnSend {
     fn send(
@@ -83,8 +88,8 @@ impl TransportSend for QuinnSend {
     fn create_terminator(&self) -> Box<dyn Terminate> {
         Box::new(QuinnTerminator(self.connection.clone()))
     }
+    
 }
-
 // Modified IntraRecv to use Quinn
 #[derive(Debug, Clone)]
 pub struct QuinnRecv {
@@ -149,19 +154,21 @@ pub struct TransportEnds {
     pub send: QuinnSend,
     pub recv: QuinnRecv,
 }
-
 // Create function now establishes Quinn connections
 pub async fn create(client_endpoint: Endpoint, server_address: SocketAddr) -> Result<TransportEnds, String> {
     //let runtime = Arc::new(Runtime::new().map_err(|e| e.to_string())?);
     
     // Establish connections
     println!("Establishing connections...");
+    let start = Instant::now();
     let client_conn = client_endpoint.connect(
         server_address,
         "localhost",
     ).map_err(|e| e.to_string())?
     .await.map_err(|e| e.to_string())?;
-    println!("Connections established successfully.");
+    let duration = start.elapsed();
+    println!("Connection established successfully in {:.2?} seconds.", duration);
+    // println!("Connections established successfully.");
 
     Ok(TransportEnds {
         send: QuinnSend {

@@ -124,30 +124,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
         
         loop {
             let mut contexts = contexts.lock().await;
-            println!("{}",contexts.len());
             let mut vec = transport_ends_vec.lock().await;
             vec.retain(|ends| {
+                if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id{
+                    if contexts.remove(ends).is_some() {
+                        println!("Context removed for client {:?} because I am no longer a leader", ends.get_remote_address());
+                    }
+                    ends.close();
+                }
                 if ends.is_active() {
-                    if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
-                        // Only create and export the service if this node is the leader and the context doesn’t already exist
-                        if !contexts.contains_key(ends) {
-                            let context = Context::with_initial_service_export(
-                                Config::default_setup(),
-                                ends.send.clone(),
-                                ends.recv.clone(),
-                                ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-                            );
-                            contexts.insert(ends.clone(), context);
-                            println!("Steganographer service started for client {:?}", ends.get_remote_address());
-                        }
-                    } else {
-                        println!("This node is not the leader; no new context created.");
+                    // Only create and export the service if this node is the leader and the context doesn’t already exist
+                    if !contexts.contains_key(ends) {
+                        let context = Context::with_initial_service_export(
+                            Config::default_setup(),
+                            ends.send.clone(),
+                            ends.recv.clone(),
+                            ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
+                        );
+                        contexts.insert(ends.clone(), context);
+                        println!("Steganographer service started for client {:?}", ends.get_remote_address());
                     }
                     true
                 } else {
                     // Remove context if the connection is no longer active
                     if contexts.remove(ends).is_some() {
-                        println!("Context removed for inactive connection {:?}", ends);
+                        println!("Context removed for inactive connection {:?}", ends.get_remote_address());
                     }
                     false
                 }
