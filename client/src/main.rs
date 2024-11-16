@@ -23,6 +23,7 @@ use std::env;
 use std::process::{Command, exit};
 use std::fs::OpenOptions;
 use std::io::Write;
+use tokio::sync::Semaphore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -82,13 +83,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut stego_portions = vec![];
-
+    let semaphore = Arc::new(Semaphore::new(5)); // Limit to 5 concurrent requests
     let process_start_time = std::time::Instant::now();
 
     for chunk in secret_images_chunks.into_iter() {
         let secret_images = chunk.clone();
         let server_addrs = server_addrs.clone();
         let client_endpoint = client_endpoint.clone();
+        let semaphore = semaphore.clone();
 
         let stego_portion = tokio::spawn(async move {
             for (index, entry) in secret_images.iter().enumerate() {
@@ -113,30 +115,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("Encoding secret image {}...", index);
             let start_time = std::time::Instant::now();
             let mut success = false;
-        
-            while start_time.elapsed().as_secs() < 120 && !success {
+            
+            let mut retries = 0;
+            let max_retries = 3;
+            let mut backoff_duration = Duration::from_secs(2);
+            while retries < max_retries && !success {
                 let mut handles = vec![];
         
                 for addr in server_addrs.clone() {
                     
-                    let ends = match timeout(Duration::from_secs(10), create(client_endpoint.clone(), addr)).await {
-                        Ok(Ok(ends)) => ends,
-                        Ok(Err(e)) => {
-                            println!("Error creating transport ends: {}", e);
-                            continue;
-                        }
-                        Err(_) => {
-                            println!("Timeout occurred while creating transport ends");
-                            continue;
-                        }
-                    };
-            
+                    
+                    let client_endpoint = client_endpoint.clone();
                     let secret_image_bytes = secret_image_bytes.clone();
                     let stego_path = stego_path.clone();
                     let finale_path = finale_path.clone();
                     let secret_file_name = secret_file_name.clone();
+                    let semaphore = semaphore.clone();
             
                     let handle = tokio::spawn(async move {
+                        let permit = semaphore.acquire().await.unwrap(); // Acquire a permit
+                        let ends = match timeout(Duration::from_secs(10), create(client_endpoint.clone(), addr)).await {
+                            Ok(Ok(ends)) => ends,
+                            Ok(Err(e)) => {
+                                retries += 1;
+                                backoff_duration *= 2;
+                                println!("Error creating transport ends: {}", e);
+                                return;
+                            }
+                            Err(_) => {
+                                retries += 1;
+                                backoff_duration *= 2;
+                                println!("Timeout occurred while creating transport ends");
+                                return;
+                            }
+                        };
+                        
                         let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
                             Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
                         context_user.disable_garbage_collection();
@@ -147,6 +160,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
                                     Ok(encoded_bytes) => Ok(encoded_bytes),
                                     Err(e) => {
+                                        retries += 1;
+                                        backoff_duration *= 2;
                                         println!("Error during encoding: {:?}", e);
                                         Err(e)
                                     }
@@ -161,9 +176,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 
                             },
                             Err(e) => {
+                                retries += 1;
+                                backoff_duration *= 2;
                                 println!("Failed to encode: {:?}", e);
                             }
                         }
+                        drop(permit); // Release the permit
                     });
                     handles.push(handle);
                 }
@@ -180,9 +198,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
+                tokio::time::sleep(backoff_duration).await;
             }
             
-            println!("Decode method invoked successfully for secret image {}", index);
             }
             Ok::<(), String>(())
         });
