@@ -341,7 +341,7 @@ impl Node {
     fn should_cast_negative_vote(&self, leader_metrics: &SystemMetrics) -> Option<VoteReason> {
         let my_metrics = &self.metrics;
 
-        if my_metrics.cpu_load < leader_metrics.cpu_load * 0.5 {
+        if my_metrics.cpu_load < leader_metrics.cpu_load {
             println!("🗳️ Node {} casting negative vote due to HighCPULoad\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
@@ -349,7 +349,7 @@ impl Node {
             );
             return Some(VoteReason::HighCPULoad);
         }
-        if my_metrics.memory_usage < leader_metrics.memory_usage * 0.5 {
+        if my_metrics.memory_usage < leader_metrics.memory_usage {
             println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
