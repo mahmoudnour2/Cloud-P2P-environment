@@ -21,6 +21,7 @@ use std::error::Error;
 use stegano_core::{SteganoCore,SteganoEncoder, CodecOptions};
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::Rng;
+use crate::{CURRENT_LEADER_ID,PERSONAL_ID};
 
 
 
@@ -52,7 +53,11 @@ impl ImageSteganographer for SomeImageSteganographer {
 
 
     fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str) -> Result<Vec<u8>, String> {
-        
+
+        if (CURRENT_LEADER_ID.load(std::sync::atomic::Ordering::Relaxed) as u64) != PERSONAL_ID.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("Only the leader can encode images".to_string());
+        }
+
         println!("Beginning Encoding");
         
         // Save the secret image to a temporary file
