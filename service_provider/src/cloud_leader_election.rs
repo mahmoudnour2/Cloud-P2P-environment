@@ -342,7 +342,7 @@ impl Node {
     fn calculate_score(&self, metrics: &SystemMetrics) -> f64 {
         const CPU_WEIGHT: f64 = 0.6;
         const MEMORY_WEIGHT: f64 = 0.4;
-        const LOAD_AVERAGE_WEIGHT: f64 = 0.8;
+        const LOAD_AVERAGE_WEIGHT: f64 = 2.0;
 
         let cpu_score = 1.0 - (metrics.cpu_load / 100.0);
         let memory_score = 1.0 - (metrics.memory_usage / 100.0);
@@ -358,26 +358,29 @@ impl Node {
         let my_metrics = &self.metrics;
 
         if my_metrics.cpu_load < leader_metrics.cpu_load {
-            println!("🗳️ Node {} casting negative vote due to HighCPULoad\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
+            println!("🗳️ Node {} casting negative vote due to HighCPULoad\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n Load Average: {:.1}% vs {:.1}\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
                 my_metrics.memory_usage, leader_metrics.memory_usage,
+                my_metrics.load_average, leader_metrics.load_average,
             );
             return Some(VoteReason::HighCPULoad);
         }
         if my_metrics.memory_usage < leader_metrics.memory_usage {
-            println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
+            println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n Load Average: {:.1}% vs {:.1}\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
                 my_metrics.memory_usage, leader_metrics.memory_usage,
+                my_metrics.load_average, leader_metrics.load_average,
             );
             return Some(VoteReason::HighMemoryUsage);
         }
         if my_metrics.load_average < leader_metrics.load_average {
-            println!("🗳️ Node {} casting negative vote due to HighLoadAverage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
+            println!("🗳️ Node {} casting negative vote due to HighLoadAverage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n Load Average: {:.1}% vs {:.1}\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
                 my_metrics.memory_usage, leader_metrics.memory_usage,
+                my_metrics.load_average, leader_metrics.load_average,
             );
             return Some(VoteReason::HighMemoryUsage);
         }
