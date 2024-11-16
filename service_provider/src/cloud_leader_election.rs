@@ -111,7 +111,7 @@ impl Node {
             state: State::Follower,
             metrics: SystemMetrics::default(),
             last_heartbeat: Instant::now(),
-            heartbeat_timeout: Duration::from_millis(5000 + rand::thread_rng().gen_range(0..1000)),
+            heartbeat_timeout: Duration::from_secs(5 + rand::thread_rng().gen_range(0..20)),
             negative_votes_received: HashMap::new(),
             candidates: Vec::new(),
             current_leader_id: None,

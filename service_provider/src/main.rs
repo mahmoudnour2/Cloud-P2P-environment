@@ -1,5 +1,6 @@
 use quinn::{Endpoint, ServerConfig, TransportConfig, ClientConfig};
 use rand::seq::index;
+use rustls::server;
 use std::error::Error;
 use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, ServiceToExport, Config};
@@ -19,7 +20,7 @@ use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
 use futures::{FutureExt, StreamExt};
 use tokio::time::{timeout, Duration};
 use tokio::task::spawn_blocking;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use std::collections::HashMap;
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
@@ -54,54 +55,79 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     
-    let mut server_endpoints = Vec::new();
-    for addr in server_addrs {
-        let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
-        server_endpoints.push(endpoint);
-    }
+    let server_endpoints = Arc::new({
+        let mut endpoints = Vec::new();
+        for addr in server_addrs {
+            let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
+            endpoints.push(endpoint);
+        }
+        endpoints
+    });
+    let server_endpoints_clone = Arc::clone(&server_endpoints);
     println!("Steganography service endpoints are setup");
 
     let transport_ends_vec = Arc::new(Mutex::new(Vec::new()));
     let transport_ends_vec_clone = Arc::clone(&transport_ends_vec);
 
+    // Limit the number of concurrent connections
+    let max_connections = 500;
+    let semaphore = Arc::new(Semaphore::new(max_connections));
+
     let connection_handle = tokio::spawn(async move {
         loop {
+            let server_endpoints_clone = Arc::clone(&server_endpoints_clone); // Clone the Arc for use within this iteration
             // Check if this node is the current leader
             if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
-            for endpoint in &server_endpoints {
-                match timeout(Duration::from_secs(1), endpoint.accept()).await {
-                    Ok(Some(incoming)) => {
-                        println!("Received a connection request from client");
-                        //incoming.await accepts the connection
-                        match incoming.await {
-                            Ok(conn) => {
-                                let ends = match create(conn).await {
-                                    Ok(ends) => ends,
-                                    Err(e) => {
-                                        eprintln!("Failed to create transport ends: {}", e);
-                                        continue;
+    
+            for endpoint in server_endpoints_clone.iter() {
+                match semaphore.try_acquire() {
+                    Ok(_) => {
+                        // Acquired a connection slot
+                        let semaphore_clone = semaphore.clone();
+                        let transport_ends_vec_clone = Arc::clone(&transport_ends_vec_clone);
+                        let endpoint = endpoint.clone(); // Clone the endpoint to move into the task
+                        tokio::spawn(async move {
+                            match timeout(Duration::from_secs(10), endpoint.accept()).await {
+                                Ok(Some(incoming)) => {
+                                    println!("Received a connection request from client");
+                                    match incoming.await {
+                                        Ok(conn) => {
+                                            let ends = match create(conn).await {
+                                                Ok(ends) => ends,
+                                                Err(e) => {
+                                                    eprintln!("Failed to create transport ends: {}", e);
+                                                    return;
+                                                }
+                                            };
+                                            let mut vec = transport_ends_vec_clone.lock().await;
+                                            vec.push(ends);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to accept incoming connection: {}", e);
+                                        }
                                     }
-                                };
-                                let mut vec = transport_ends_vec_clone.lock().await;
-                                vec.push(ends);
+                                }
+                                Ok(None) => {
+                                    println!("Server endpoint has stopped accepting new connections");
+                                }
+                                Err(e) => {
+                                    eprintln!("Error accepting incoming connection: {}", e);
+                                }
                             }
-                            Err(e) => {
-                                eprintln!("Failed to accept incoming connection: {}", e);
-                            }
-                        }
+                            drop(semaphore_clone); // Release the semaphore when done
+                        });
                     }
-                    Ok(None) => {
-                        println!("Server endpoint has stopped accepting new connections");
-                        // No incoming connection within the timeout duration
-                    }
-                    Err(e) => {
-                        eprintln!("Error accepting incoming connection: {}", e);
+                    Err(_) => {
+                        println!("Max connections reached, waiting for a connection to close...");
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
                     }
                 }
             }
+    
             let ctrl_c_timeout = Duration::from_secs(1);
             match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
                 Ok(Ok(())) => {
@@ -116,12 +142,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-
-        // Wait for Ctrl-C
-        tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
+    
         println!("Shutting down connection handle...");
         Ok::<(), String>(())
     });
+    
+    
 
 
     let contexts: Arc<Mutex<HashMap<TransportEnds, Context>>> = Arc::new(Mutex::new(HashMap::new()));
