@@ -19,6 +19,8 @@ use std::sync::{Arc, Barrier};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use stegano_core::{SteganoCore,SteganoEncoder, CodecOptions};
+use std::time::{SystemTime, UNIX_EPOCH};
+use rand::Rng;
 
 
 
@@ -54,7 +56,13 @@ impl ImageSteganographer for SomeImageSteganographer {
         println!("Beginning Encoding");
         
         // Save the secret image to a temporary file
-        let temp_secret_path = format!("/tmp/{}",file_name);
+        //TODO: Fix the path, this current path will break the decoder later on
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let random_num = rand::thread_rng().gen_range(0..1000);
+        let temp_secret_path = format!("/tmp/{}_{}_{}", timestamp, random_num, file_name);
         let mut temp_secret_file = File::create(&temp_secret_path).map_err(|e| e.to_string())?;
         temp_secret_file.write_all(secret_image).map_err(|e| e.to_string())?;
         temp_secret_file.flush().map_err(|e| e.to_string())?;

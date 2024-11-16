@@ -75,24 +75,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(Some(incoming)) => {
                         println!("Received a connection request from client");
                         //incoming.await accepts the connection
-                        if let Ok(conn) = incoming.await {
-                            let ends = match create(conn).await {
-                                Ok(ends) => ends,
-                                Err(e) => {
-                                    eprintln!("Failed to create transport ends: {}", e);
-                                    continue;
-                                }
-                            };
-                            let mut vec = transport_ends_vec_clone.lock().await;
-                            vec.push(ends);
+                        match incoming.await {
+                            Ok(conn) => {
+                                let ends = match create(conn).await {
+                                    Ok(ends) => ends,
+                                    Err(e) => {
+                                        eprintln!("Failed to create transport ends: {}", e);
+                                        continue;
+                                    }
+                                };
+                                let mut vec = transport_ends_vec_clone.lock().await;
+                                vec.push(ends);
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to accept incoming connection: {}", e);
+                            }
                         }
                     }
                     Ok(None) => {
                         println!("Server endpoint has stopped accepting new connections");
                         // No incoming connection within the timeout duration
                     }
-                    Err(_) => {
-                        // println!("No incoming connection within the timeout duration");
+                    Err(e) => {
+                        eprintln!("Error accepting incoming connection: {}", e);
                     }
                 }
             }

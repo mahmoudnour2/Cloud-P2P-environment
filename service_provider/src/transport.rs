@@ -186,6 +186,9 @@ impl Hash for TransportEnds {
         self.recv.connection.stable_id().hash(state);
     }
 }
+
+
+
 impl TransportEnds {
 
     pub fn is_active(&self) -> bool {
@@ -254,13 +257,19 @@ pub async fn create(server_conn: Connection) -> Result<TransportEnds, String> {
 
     println!("Connections established successfully.");
 
-    Ok(TransportEnds {
+    let transport_ends = TransportEnds {
         send: QuinnSend {
             connection: new_conn.clone(),
         },
         recv: QuinnRecv {
             connection: new_conn.clone(),
         },
-    })
+    };
+
+    // Close the conections
+    server_conn.close(0u32.into(), b"endpoint closed");
+
+
+    Ok(transport_ends)
 
 }
