@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
+pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -40,8 +41,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ];
 
     println!("Quin node is beginning setup");
+    let my_id = 2; // Make sure this matches your node ID
+    PERSONAL_ID.store(my_id as u64, AtomicOrdering::Relaxed);
 
-    let mut quinn_node = Node::new(3, server_addr_leader_election, peer_servers_leader_election).await?;
+    let mut quinn_node = Node::new(my_id, server_addr_leader_election, peer_servers_leader_election).await?;
     // Spawn the Node task
     let node_handle = tokio::spawn(async move {
         quinn_node.run().await;
@@ -49,8 +52,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Shutting down node...");
         Ok::<(), Box<dyn Error + Send>>(())
     });
-
-    let my_id = 3; // Make sure this matches your node ID
 
     
     let mut server_endpoints = Vec::new();
@@ -65,11 +66,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let connection_handle = tokio::spawn(async move {
         loop {
-            // Check if this node is the current leader
-            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
             for endpoint in &server_endpoints {
                 match timeout(Duration::from_secs(1), endpoint.accept()).await {
                     Ok(Some(incoming)) => {
@@ -134,21 +130,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut vec = transport_ends_vec.lock().await;
             vec.retain(|ends| {
                 if ends.is_active() {
-                    if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
-                        // Only create and export the service if this node is the leader and the context doesn’t already exist
-                        if !contexts.contains_key(ends) {
-                            let context = Context::with_initial_service_export(
-                                Config::default_setup(),
-                                ends.send.clone(),
-                                ends.recv.clone(),
-                                ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-                            );
-                            contexts.insert(ends.clone(), context);
-                            println!("Steganographer service started for client {:?}", ends.get_remote_address());
-                        }
-                    } else {
-                        println!("This node is not the leader; no new context created.");
+                    
+                    // Only create and export the service if this node is the leader and the context doesn’t already exist
+                    if !contexts.contains_key(ends) {
+                        let context = Context::with_initial_service_export(
+                            Config::default_setup(),
+                            ends.send.clone(),
+                            ends.recv.clone(),
+                            ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
+                        );
+                        contexts.insert(ends.clone(), context);
+                        println!("Steganographer service started for client {:?}", ends.get_remote_address());
                     }
+                    
                     true
                 } else {
                     // Remove context if the connection is no longer active
