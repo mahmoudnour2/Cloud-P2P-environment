@@ -16,6 +16,9 @@ use sysinfo::{System};
 use crate::{quinn_utils::*, CURRENT_LEADER_ID};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::fs::File;
+use std::io::{self, BufRead};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
@@ -34,6 +37,7 @@ pub enum VoteReason {
 pub struct SystemMetrics {
     pub cpu_load: f64,
     pub memory_usage: f64,
+    pub load_average: f64,
 }
 
 impl Default for SystemMetrics {
@@ -41,6 +45,8 @@ impl Default for SystemMetrics {
         Self {
             cpu_load: 50.0,
             memory_usage: 60.0,
+            load_average: 70.0,
+            
         }
     }
 }
@@ -307,6 +313,7 @@ impl Node {
         SystemMetrics {
             cpu_load: self.measure_cpu_load(),
             memory_usage: self.measure_memory_usage(),
+            load_average: self.measure_load_average(),
         }
     }
 
@@ -325,14 +332,23 @@ impl Node {
         (used_memory as f64 / total_memory as f64) * 100.0
     }
 
+    fn measure_load_average(&self) -> f64 {
+        let mut system = System::new_all();
+        system.refresh_all();
+        let load_average = System::load_average();
+        load_average.one
+    }
+
     fn calculate_score(&self, metrics: &SystemMetrics) -> f64 {
         const CPU_WEIGHT: f64 = 0.6;
         const MEMORY_WEIGHT: f64 = 0.4;
+        const LOAD_AVERAGE_WEIGHT: f64 = 0.8;
 
         let cpu_score = 1.0 - (metrics.cpu_load / 100.0);
         let memory_score = 1.0 - (metrics.memory_usage / 100.0);
+        let load_average_score = 1.0 - (metrics.load_average / 100.0);
 
-        let base_score = cpu_score * CPU_WEIGHT + memory_score * MEMORY_WEIGHT;
+        let base_score = cpu_score * CPU_WEIGHT + memory_score * MEMORY_WEIGHT + load_average_score * LOAD_AVERAGE_WEIGHT;
 
         // Add ±2% randomization for non-prejudiced selection
         base_score * (0.98 + rand::thread_rng().gen::<f64>() * 0.04)
@@ -351,6 +367,14 @@ impl Node {
         }
         if my_metrics.memory_usage < leader_metrics.memory_usage {
             println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
+                self.id, 
+                my_metrics.cpu_load, leader_metrics.cpu_load,
+                my_metrics.memory_usage, leader_metrics.memory_usage,
+            );
+            return Some(VoteReason::HighMemoryUsage);
+        }
+        if my_metrics.load_average < leader_metrics.load_average {
+            println!("🗳️ Node {} casting negative vote due to HighLoadAverage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
                 my_metrics.memory_usage, leader_metrics.memory_usage,
