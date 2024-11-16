@@ -21,7 +21,7 @@ use futures::{FutureExt, StreamExt};
 use tokio::time::{timeout, Duration};
 use tokio::task::spawn_blocking;
 use tokio::sync::{Mutex, Semaphore};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
@@ -70,8 +70,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let transport_ends_vec_clone = Arc::clone(&transport_ends_vec);
 
     // Limit the number of concurrent connections
-    let max_connections = 500;
+    let max_connections = 10;
     let semaphore = Arc::new(Semaphore::new(max_connections));
+    let request_queue = Arc::new(Mutex::new(VecDeque::new()));
 
     let connection_handle = tokio::spawn(async move {
         loop {
@@ -90,7 +91,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let transport_ends_vec_clone = Arc::clone(&transport_ends_vec_clone);
                         let endpoint = endpoint.clone(); // Clone the endpoint to move into the task
                         tokio::spawn(async move {
-                            match timeout(Duration::from_secs(10), endpoint.accept()).await {
+                            match timeout(Duration::from_secs(1000), endpoint.accept()).await {
                                 Ok(Some(incoming)) => {
                                     println!("Received a connection request from client");
                                     match incoming.await {
@@ -121,9 +122,57 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         });
                     }
                     Err(_) => {
-                        println!("Max connections reached, waiting for a connection to close...");
+                        println!("Max connections reached, queuing the request...");
+                        let mut queue = request_queue.lock().await;
+                        queue.push_back(endpoint.clone());
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         continue;
+                    }
+                }
+            }
+
+            {
+                let mut queue = request_queue.lock().await;
+                while let Some(endpoint) = queue.pop_front() {
+                    match semaphore.try_acquire() {
+                        Ok(_) => {
+                            let semaphore_clone = semaphore.clone();
+                            let transport_ends_vec_clone = Arc::clone(&transport_ends_vec_clone);
+                            tokio::spawn(async move {
+                                match timeout(Duration::from_secs(1000), endpoint.accept()).await {
+                                    Ok(Some(incoming)) => {
+                                        println!("Received a connection request from client");
+                                        match incoming.await {
+                                            Ok(conn) => {
+                                                let ends = match create(conn).await {
+                                                    Ok(ends) => ends,
+                                                    Err(e) => {
+                                                        eprintln!("Failed to create transport ends: {}", e);
+                                                        return;
+                                                    }
+                                                };
+                                                let mut vec = transport_ends_vec_clone.lock().await;
+                                                vec.push(ends);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Failed to accept incoming connection: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        println!("Server endpoint has stopped accepting new connections");
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Error accepting incoming connection: {}", e);
+                                    }
+                                }
+                                drop(semaphore_clone); // Release the semaphore when done
+                            });
+                        }
+                        Err(_) => {
+                            queue.push_front(endpoint);
+                            break;
+                        }
                     }
                 }
             }
@@ -156,6 +205,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let steg_handle = tokio::spawn(async move {
         
         loop {
+            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
             let mut contexts = contexts.lock().await;
             println!("{}",contexts.len());
             let mut vec = transport_ends_vec.lock().await;
