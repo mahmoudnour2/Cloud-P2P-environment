@@ -111,7 +111,7 @@ impl Node {
             state: State::Follower,
             metrics: SystemMetrics::default(),
             last_heartbeat: Instant::now(),
-            heartbeat_timeout: Duration::from_secs(5),
+            heartbeat_timeout: Duration::from_millis(5000 + rand::thread_rng().gen_range(0..1000)),
             negative_votes_received: HashMap::new(),
             candidates: Vec::new(),
             current_leader_id: None,
@@ -341,7 +341,7 @@ impl Node {
     fn should_cast_negative_vote(&self, leader_metrics: &SystemMetrics) -> Option<VoteReason> {
         let my_metrics = &self.metrics;
 
-        if my_metrics.cpu_load < leader_metrics.cpu_load * 0.7 {
+        if my_metrics.cpu_load < leader_metrics.cpu_load * 0.5 {
             println!("🗳️ Node {} casting negative vote due to HighCPULoad\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,
@@ -349,7 +349,7 @@ impl Node {
             );
             return Some(VoteReason::HighCPULoad);
         }
-        if my_metrics.memory_usage < leader_metrics.memory_usage * 0.7 {
+        if my_metrics.memory_usage < leader_metrics.memory_usage * 0.5 {
             println!("🗳️ Node {} casting negative vote due to HighMemoryUsage\n Node Metrics vs Leader Metrics:\n CPU: {:.1}% vs {:.1}%\n Memory: {:.1}% vs {:.1}%\n", 
                 self.id, 
                 my_metrics.cpu_load, leader_metrics.cpu_load,

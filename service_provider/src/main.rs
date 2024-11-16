@@ -66,6 +66,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let connection_handle = tokio::spawn(async move {
         loop {
+            // Check if this node is the current leader
+            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
             for endpoint in &server_endpoints {
                 match timeout(Duration::from_secs(1), endpoint.accept()).await {
                     Ok(Some(incoming)) => {
