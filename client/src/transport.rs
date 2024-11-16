@@ -143,15 +143,15 @@ pub struct TransportEnds {
 
 // Create function now establishes Quinn connections
 pub async fn create(client_endpoint: Endpoint, server_address: SocketAddr) -> Result<TransportEnds, String> {
-    //let runtime = Arc::new(Runtime::new().map_err(|e| e.to_string())?);
     
     // Establish connections
     println!("Establishing connections...");
-    let client_conn = client_endpoint.connect(
+    let client_connecting = client_endpoint.connect(
         server_address,
         "localhost",
-    ).map_err(|e| e.to_string())?
-    .await.map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
+    
+    let client_conn = client_connecting.await.map_err(|e| e.to_string())?;
     
 
     // Receive the server's IP address
@@ -201,11 +201,13 @@ pub async fn create(client_endpoint: Endpoint, server_address: SocketAddr) -> Re
     new_client_endpoint.set_default_client_config(client_config);
 
 
-    let new_client_conn = new_client_endpoint.connect(
+    let new_client_connecting = new_client_endpoint.connect(
         server_address,
         "localhost",
-    ).map_err(|e| e.to_string())?
-    .await.map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
+
+    let new_client_conn = new_client_connecting.await.map_err(|e| e.to_string())?;
+    
     println!("Connections established successfully.");
 
     Ok(TransportEnds {

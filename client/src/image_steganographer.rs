@@ -59,25 +59,9 @@ impl ImageSteganographer for SomeImageSteganographer {
         temp_secret_file.write_all(secret_image).map_err(|e| e.to_string())?;
         temp_secret_file.flush().map_err(|e| e.to_string())?;
 
-        // Load the secret image from the temporary file
-        //let secret_image = File::open(temp_secret_path).map_err(|e| e.to_string())?;
-        
-
-        // Load the carrier image
-        //let carrier_path = "/home/magdeldin/Cloud-P2P-environment/service_provider/carrier.jpg";
 
         let carrier_path = "carrier.png";
 
-        //let carrier = file_as_dynamic_image(carrier_path.to_string());
-
-        // let carrier = if carrier_path.ends_with(".jpg") || carrier_path.ends_with(".jpeg") {
-        //     let mut buffer = Vec::new();
-        //     carrier.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
-        //     let carrier_bytes = buffer;
-        //     image::load_from_memory(&carrier_bytes).unwrap()
-        // } else {
-        //     carrier
-        // };
 
         SteganoCore::encoder()
             .hide_file(&temp_secret_path)
@@ -85,18 +69,8 @@ impl ImageSteganographer for SomeImageSteganographer {
             .write_to(output_path)
             .hide();
         
-        // let encoder = Encoder::new(secret_image,carrier);
-        
-        // let encoded_buffer = encoder.encode_alpha();
-        
-        // save_image_buffer(encoded_buffer.clone(), output_path.to_string());
 
 
-
-        // let encoded_image = DynamicImage::ImageRgba8(ImageBuffer::from_raw(encoded_buffer.width(), encoded_buffer.height(), encoded_buffer.into_vec()).unwrap());
-
-
-        // encoded_image.save(output_path).unwrap();
         println!("Encoded image saved to {}", output_path);
 
         let encoded_image = image::open(output_path).unwrap();
@@ -104,6 +78,7 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         let mut buffer = Vec::new();
         encoded_image.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
+        
         // Delete the temporary secret image file
         std::fs::remove_file(&temp_secret_path).map_err(|e| e.to_string())?;
         println!("Buffer length: {}", buffer.len());

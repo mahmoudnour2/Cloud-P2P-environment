@@ -19,14 +19,20 @@ use image;
 use steganography::{self, util::file_to_bytes};
 use tokio::task;
 use tokio::time::timeout;
+use std::env;
+use std::process::{Command, exit};
+use std::fs::OpenOptions;
+use std::io::Write;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    
+    
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
         "10.7.19.117:5017".parse()?,
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.17.170:4800".parse()?;  // Listen on this port
+    let client_addr: SocketAddr = "10.7.17.170:0".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 
@@ -75,6 +81,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut stego_portions = vec![];
 
+    let process_start_time = std::time::Instant::now();
+
     for chunk in secret_images_chunks.into_iter() {
         let secret_images = chunk.clone();
         let server_addrs = server_addrs.clone();
@@ -108,11 +116,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let mut handles = vec![];
         
                 for addr in server_addrs.clone() {
-                    let ends = match create(client_endpoint.clone(), addr).await {
-                        Ok(ends) => ends,
-                        Err(e) => {
-                        println!("Error creating transport ends: {}", e);
-                        continue;
+                    
+                    let ends = match timeout(Duration::from_secs(10), create(client_endpoint.clone(), addr)).await {
+                        Ok(Ok(ends)) => ends,
+                        Ok(Err(e)) => {
+                            println!("Error creating transport ends: {}", e);
+                            continue;
+                        }
+                        Err(_) => {
+                            println!("Timeout occurred while creating transport ends");
+                            continue;
                         }
                     };
             
@@ -127,41 +140,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         context_user.disable_garbage_collection();
                         let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
                         println!("Encoding secret image {} with proxy", index);
-                        let stegano = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                            // match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
-                            //     Ok(encoded_bytes) => Ok(encoded_bytes),
-                            //     Err(e) => {
-                            //         println!("Error during encoding: {:?}", e);
-                            //         Err(e)
-                            //     }
-                            // }
-
-                            match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
-                                Ok(encoded_bytes) => {
-                                    // Save the encoded image to a file
-                                    let output_path = format!("stego_{}", secret_file_name);
-                                    std::fs::write(&output_path, &encoded_bytes)
-                                        .map_err(|e| format!("Failed to save encoded image: {}", e))?;
-                                    Ok(encoded_bytes)
-                                },
-                                Err(e) => Err(e)
-                            }
-                        })).unwrap_or_else(|e| {
-                            println!("Connection error occurred: {:?}", e);
-                            drop(image_steganographer_proxy);
-                            drop(context_user);
-                            drop(ends);
-                            Err("Connection lost during encoding".to_string())
-                        });
+                        let stegano = timeout(Duration::from_secs(60), async {
+                            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                                match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
+                                    Ok(encoded_bytes) => Ok(encoded_bytes),
+                                    Err(e) => {
+                                        println!("Error during encoding: {:?}", e);
+                                        Err(e)
+                                    }
+                                }
+                            }))
+                        }).await.unwrap_or_else(|_| Err(Box::new("Timeout occurred during encoding".to_string()) as Box<dyn std::any::Any + std::marker::Send>));
                         
                         // Handle the result
                         match stegano {
-                            Ok(_) => println!("Encoding completed successfully"),
+                            Ok(_) => {
+                                println!("Encoding completed successfully")
+                                
+                            },
                             Err(e) => {
                                 println!("Failed to encode: {:?}", e);
-                                // context_user_clone.clear_service_registry();
-                                // drop(context_user_clone);
-                                // drop(image_steganographer_proxy_clone);
                             }
                         }
                     });
@@ -202,6 +200,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+
+    let process_duration = process_start_time.elapsed();
+    let csv_path = "process_times.csv";
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(csv_path)
+        .map_err(|e| format!("Failed to open CSV file: {}", e))?;
+
+    writeln!(file, "{}", process_duration.as_secs())
+        .map_err(|e| format!("Failed to write to CSV file: {}", e))?;
 
     // let steg_handle = tokio::spawn(async move{
 
@@ -297,9 +306,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     
 
-    // Keep the server running
-    tokio::signal::ctrl_c().await?;
     println!("Shutting down server...");
+    tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl_c signal");
 
     // let _ = tokio::join!(steg_handle);
 
