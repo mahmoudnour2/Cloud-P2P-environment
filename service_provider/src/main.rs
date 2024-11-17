@@ -25,6 +25,8 @@ use std::collections::{HashMap, VecDeque};
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
+pub static NODE_STATE: AtomicU64 = AtomicU64::new(0);
+pub static LAST_FAILURE: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -260,13 +262,73 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok::<(), String>(())
     });
 
+    let failure_simulation_handle = {
+        let transport_ends_vec = Arc::clone(&transport_ends_vec);
+        let contexts = Arc::clone(&contexts);
+        let my_id = my_id;
+        
+        tokio::spawn(async move {
+            let mut rng = rand::thread_rng();
+            loop {
+                // Random interval between 30 and 120 seconds
+                let sleep_duration = rng.gen_range(30..120);
+                tokio::time::sleep(Duration::from_secs(sleep_duration)).await;
+
+                // Only simulate failure if we're the leader
+                if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) == my_id {
+                    println!("🔧 Simulating node failure for Node {}", my_id);
+                    
+                    // Set node state to sleep
+                    NODE_STATE.store(1, AtomicOrdering::SeqCst);
+                    LAST_FAILURE.store(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                        AtomicOrdering::SeqCst
+                    );
+
+                    // Clear all contexts and transport ends
+                    {
+                        let mut contexts = contexts.lock().await;
+                        contexts.clear();
+                        println!("Cleared all service contexts");
+                    }
+                    {
+                        let mut ends = transport_ends_vec.lock().await;
+                        ends.clear();
+                        println!("Cleared all transport ends");
+                    }
+
+                    // Sleep for 20 seconds
+                    tokio::time::sleep(Duration::from_secs(20)).await;
+
+                    // Reset node state
+                    NODE_STATE.store(0, AtomicOrdering::SeqCst);
+                    println!("🔧 Node {} recovered from simulated failure", my_id);
+                }
+
+                // Check for ctrl+c
+                let ctrl_c_timeout = Duration::from_secs(1);
+                match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
+                    Ok(Ok(())) => break,
+                    Ok(Err(e)) => println!("Error waiting for Ctrl+C: {}", e),
+                    Err(_) => {} // Timeout occurred, continue the loop
+                }
+            }
+
+            println!("Shutting down failure simulation...");
+            Ok::<(), String>(())
+        })
+    };
+
     // Wait for Ctrl-C
 
     tokio::signal::ctrl_c().await?;
     println!("Shutting down server...");
 
     // Await both handles to ensure clean shutdown
-    let _ = tokio::join!(node_handle, steg_handle,connection_handle);
+    let _ = tokio::join!(node_handle, steg_handle, connection_handle, failure_simulation_handle);
 
     Ok(())
 } 
