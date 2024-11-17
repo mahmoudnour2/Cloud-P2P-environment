@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, ServiceToExport, Config};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use rand::Rng;
 
 mod transport;
 mod image_steganographer;
@@ -203,7 +204,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let contexts: Arc<Mutex<HashMap<TransportEnds, Context>>> = Arc::new(Mutex::new(HashMap::new()));
 
+    let transport_ends_vec_for_steg = Arc::clone(&transport_ends_vec);
     // Spawn the steganographer service task
+    let steg_contexts = Arc::clone(&contexts);
     let steg_handle = tokio::spawn(async move {
         
         loop {
@@ -211,9 +214,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
-            let mut contexts = contexts.lock().await;
+            let mut contexts = steg_contexts.lock().await;
             println!("{}",contexts.len());
-            let mut vec = transport_ends_vec.lock().await;
+            let mut vec = transport_ends_vec_for_steg.lock().await;
             vec.retain(|ends| {
                 if ends.is_active() {
                     
@@ -268,10 +271,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let my_id = my_id;
         
         tokio::spawn(async move {
-            let mut rng = rand::thread_rng();
             loop {
-                // Random interval between 30 and 120 seconds
-                let sleep_duration = rng.gen_range(30..120);
+                // Create new RNG instance inside the loop
+                let sleep_duration = {
+                    let mut rng = rand::thread_rng();
+                    rng.gen_range(30..120)
+                };
+                
                 tokio::time::sleep(Duration::from_secs(sleep_duration)).await;
 
                 // Only simulate failure if we're the leader
