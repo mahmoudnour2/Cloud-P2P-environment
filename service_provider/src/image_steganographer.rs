@@ -54,9 +54,7 @@ impl ImageSteganographer for SomeImageSteganographer {
 
     fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str) -> Result<Vec<u8>, String> {
 
-        if (CURRENT_LEADER_ID.load(std::sync::atomic::Ordering::Relaxed) as u64) != PERSONAL_ID.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err("Only the leader can encode images".to_string());
-        }
+
 
         println!("Beginning Encoding");
         
