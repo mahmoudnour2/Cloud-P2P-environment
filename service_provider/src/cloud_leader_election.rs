@@ -20,11 +20,15 @@ use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
 
+pub static NODE_STATE: AtomicU64 = AtomicU64::new(0); // 0 = Normal, 1 = Sleep
+pub static LAST_FAILURE: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
     Follower,
     Leader,
-    DefactoLeader, // Temporary state when handling election after leader death
+    DefactoLeader,
+    Sleep,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,11 +136,27 @@ impl Node {
 
     pub async fn run(&mut self) {
         loop {
+            if NODE_STATE.load(AtomicOrdering::SeqCst) == 1 {
+                println!("Node {} is in sleep state", self.id);
+                self.state = State::Sleep;
+                self.current_leader_id = None;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+
             match self.state {
                 State::Leader => self.run_leader().await,
                 State::Follower => self.run_follower().await,
                 State::DefactoLeader => self.handle_election().await,
+                State::Sleep => {
+                    if NODE_STATE.load(AtomicOrdering::SeqCst) == 0 {
+                        self.state = State::Follower;
+                        println!("Node {} waking up from sleep state", self.id);
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
             }
+
             let ctrl_c_timeout = Duration::from_secs(1);
             match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
                 Ok(Ok(())) => {
