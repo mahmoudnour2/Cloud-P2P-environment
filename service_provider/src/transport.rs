@@ -210,6 +210,9 @@ impl TransportEnds {
     pub fn get_remote_address(&self) -> String{
         format!("{}", self.send.connection.remote_address())
     }
+    pub fn close(&self) {
+        self.send.connection.close(0u32.into(), &[]);
+    }
 
 
 }
