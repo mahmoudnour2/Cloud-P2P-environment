@@ -33,19 +33,19 @@ pub static LAST_FAILURE: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints for Node
-    let server_addr_leader_election: SocketAddr = "10.7.19.117:5016".parse()?;
+    let server_addr_leader_election: SocketAddr = "10.7.16.154:5016".parse()?;
     let peer_servers_leader_election: Vec<SocketAddr> = vec![
-        "10.7.16.154:5016".parse()?,
+        "10.7.19.117:5016".parse()?,
         "10.7.16.71:5016".parse()?,
     ];
 
     // Setup Quinn endpoints for steganographer
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.19.117:5017".parse()?,
+        "10.7.16.154:5017".parse()?,
     ];
 
     println!("Quin node is beginning setup");
-    let my_id = 2; // Make sure this matches your node ID
+    let my_id = 1; // Make sure this matches your node ID
     PERSONAL_ID.store(my_id as u64, AtomicOrdering::Relaxed);
 
     let mut quinn_node = Node::new(my_id, server_addr_leader_election, peer_servers_leader_election).await?;
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let transport_ends_vec_clone = Arc::clone(&transport_ends_vec);
 
     // Limit the number of concurrent connections
-    let max_connections = 10;
+    let max_connections = 1000;
     let semaphore = Arc::new(Semaphore::new(max_connections));
     let request_queue = Arc::new(Mutex::new(VecDeque::new()));
 

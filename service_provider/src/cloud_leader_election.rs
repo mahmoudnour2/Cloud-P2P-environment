@@ -13,14 +13,13 @@ use std::error::Error;
 use anyhow::Result;
 use std::sync::Arc;
 use sysinfo::{System};
-use crate::{quinn_utils::*, CURRENT_LEADER_ID};
+use crate::{quinn_utils::*, CURRENT_LEADER_ID,NODE_STATE};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
 
-pub static NODE_STATE: AtomicU64 = AtomicU64::new(0); // 0 = Normal, 1 = Sleep
 pub static LAST_FAILURE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,7 +120,7 @@ impl Node {
             state: State::Follower,
             metrics: SystemMetrics::default(),
             last_heartbeat: Instant::now(),
-            heartbeat_timeout: Duration::from_secs(5 + rand::thread_rng().gen_range(0..20)),
+            heartbeat_timeout: Duration::from_secs(8),
             negative_votes_received: HashMap::new(),
             candidates: Vec::new(),
             current_leader_id: None,
@@ -151,11 +150,18 @@ impl Node {
                 State::Sleep => {
                     if NODE_STATE.load(AtomicOrdering::SeqCst) == 0 {
                         self.state = State::Follower;
-                        println!("Node {} waking up from sleep state", self.id);
+                        self.last_heartbeat = Instant::now();
+                        self.heartbeat_timeout = Duration::from_secs(8);
+                        self.negative_votes_received.clear();
+                        self.candidates.clear();
+                        self.current_leader_id = None;
+                        println!("Node {} waking up from sleep state and resetting state", self.id);
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
+
+
 
             let ctrl_c_timeout = Duration::from_secs(1);
             match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
