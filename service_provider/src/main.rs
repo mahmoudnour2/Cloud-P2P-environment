@@ -218,6 +218,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("{}",contexts.len());
             let mut vec = transport_ends_vec_for_steg.lock().await;
             vec.retain(|ends| {
+                if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id{
+                    if contexts.remove(ends).is_some() {
+                        println!("Context removed for client {:?} because I am no longer a leader", ends.get_remote_address());
+                    }
+                    ends.close();
+                }
                 if ends.is_active() {
                     
                     // Only create and export the service if this node is the leader and the context doesn’t already exist
