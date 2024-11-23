@@ -11,9 +11,10 @@ yup-oauth2 = "11.0.0"
 hyper = { version = "1", features = ["full"] }
 http-body-util = "0.1"
 hyper-rustls = "0.27.3"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "sync"] }
 hyper-util = { version = "0.1", features = ["full"] }
-rustls = { version = "0.23.17", features = ["ring"] }
+rustls = { version = "0.23.18", features = ["ring"] }
 csv = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 mime = "0.3"
+lazy_static = "1.4"
