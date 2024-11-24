@@ -17,7 +17,7 @@ use quinn_proto::crypto::rustls::QuicClientConfig;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime, PrivatePkcs8KeyDer};
 use tracing::{error, info};
 use url::Url;
-use quinn::{Endpoint, ClientConfig, ServerConfig};
+use quinn::{Endpoint, ClientConfig, ServerConfig, TransportConfig, VarInt};
 use std::error::Error;
 use std::net::ToSocketAddrs;
 use std::fs::File;
@@ -143,6 +143,7 @@ pub fn configure_server(
         ServerConfig::with_single_cert(vec![cert_der.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_concurrent_uni_streams(0_u8.into());
+    transport_config.max_concurrent_bidi_streams(VarInt::from_u32(50)); // Set max concurrent streams
 
     Ok((server_config, cert_der))
 }
