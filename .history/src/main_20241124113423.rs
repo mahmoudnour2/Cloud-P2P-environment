@@ -181,6 +181,7 @@ impl DoS {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Current directory: {:?}", env::current_dir().unwrap());
     dotenv::dotenv().ok();
     println!("Loaded environment variables.");
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
