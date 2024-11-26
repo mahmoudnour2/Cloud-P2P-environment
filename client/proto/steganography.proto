@@ -1,0 +1,16 @@
+syntax = "proto3";
+package steganography;
+
+service Encoder {
+    rpc Encode (EncodeRequest) returns (EncodeReply);
+}
+
+message EncodeRequest {
+   bytes image = 1;
+   string output_path = 2;
+   string file_name = 3;
+}
+
+message EncodeReply {
+    bytes image = 1;
+}

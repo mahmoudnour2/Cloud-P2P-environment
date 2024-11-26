@@ -9,9 +9,8 @@ use std::time::Duration;
 use std::panic::AssertUnwindSafe;
 
 mod transport;
-mod image_steganographer;
 mod quinn_utils;
-use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
+//use image_steganographer::{ImageSteganographer};
 use transport::{create, TransportEnds};
 use quinn_utils::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
@@ -25,35 +24,30 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use tokio::sync::Semaphore;
 
+use image_steganographer::encoder_client::EncoderClient;
+use image_steganographer::EncodeRequest;
+use image_steganographer::EncodeReply;
+
+pub mod image_steganographer {
+    tonic::include_proto!("steganography");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
     
     // Setup Quinn endpoints
-    let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.19.117:5017".parse()?,
-        "10.7.16.154:5017".parse()?,
-        "10.7.16.71:5017".parse()?,
+    let server_addrs: Vec<&str> = vec![
+        "fe80::4ed7:17ff:fe7f:d11b:5017",
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.17.170:0".parse()?;  // Listen on this port
+    //let client_addr: SocketAddr = "fe80::4ed7:17ff:fe7d:ef1e:0".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 
     //let (server_endpoint, _server_cert) = make_server_endpoint(server_addr).unwrap();
     
 
-    let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
-        rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(SkipServerVerification::new())
-            .with_no_client_auth(),
-    )?));
-    let mut transport_config = TransportConfig::default();
-    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
-    client_config.transport_config(Arc::new(transport_config));
-
-    let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
-    client_endpoint.set_default_client_config(client_config);
+    
 
 
     println!("Quinn endpoints setup successfully.");
@@ -89,118 +83,82 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for chunk in secret_images_chunks.into_iter() {
         let secret_images = chunk.clone();
         let server_addrs = server_addrs.clone();
-        let client_endpoint = client_endpoint.clone();
-        let semaphore = semaphore.clone();
+        //let semaphore = semaphore.clone();
 
         let stego_portion = tokio::spawn(async move {
             for (index, entry) in secret_images.iter().enumerate() {
-            let secret_path = entry;
-            let secret_file_name = secret_path.file_name()
-                .ok_or("Failed to get filename")?
-                .to_str()
-                .ok_or("Failed to convert filename to string")?
-                .to_string();
-        
-            println!("Processing secret image {}: {}", index, secret_file_name);
-        
-            let secret_file = std::fs::File::open(&secret_path)
-                .map_err(|e| format!("Failed to open secret file: {}", e))?;
-            let secret_image = file_to_bytes(secret_file);
-            let secret_image_bytes = &secret_image;
-        
-            // Generate unique output paths for each image
-            let stego_path = format!("encoded_images/stego_{}.png", secret_file_name);
-            let finale_path = format!("decoded_images");
-        
-            println!("Encoding secret image {}...", index);
-            let start_time = std::time::Instant::now();
-            let mut success = false;
+                let secret_path = entry;
+                let secret_file_name = secret_path.file_name()
+                    .ok_or("Failed to get filename")?
+                    .to_str()
+                    .ok_or("Failed to convert filename to string")?
+                    .to_string();
             
-            let mut retries = 0;
-            let max_retries = 3;
-            let mut backoff_duration = Duration::from_secs(2);
-            while retries < max_retries && !success {
+                println!("Processing secret image {}: {}", index, secret_file_name);
+            
+                let secret_file = std::fs::File::open(&secret_path)
+                    .map_err(|e| format!("Failed to open secret file: {}", e))?;
+                let secret_image = file_to_bytes(secret_file);
+                let secret_image_bytes = &secret_image;
+            
+                // Generate unique output paths for each image
+                let stego_path = format!("encoded_images/stego_{}.png", secret_file_name);
+                let finale_path = format!("decoded_images");
                 let mut handles = vec![];
-        
-                for addr in server_addrs.clone() {
-                    
-                    
-                    let client_endpoint = client_endpoint.clone();
+
+                for server_addr in &server_addrs {
                     let secret_image_bytes = secret_image_bytes.clone();
                     let stego_path = stego_path.clone();
-                    let finale_path = finale_path.clone();
                     let secret_file_name = secret_file_name.clone();
-                    let semaphore = semaphore.clone();
-            
+                    let server_addr = server_addr.to_string();
+
                     let handle = tokio::spawn(async move {
-                        let permit = semaphore.acquire().await.unwrap(); // Acquire a permit
-                        let ends = match timeout(Duration::from_secs(10), create(client_endpoint.clone(), addr)).await {
-                            Ok(Ok(ends)) => ends,
-                            Ok(Err(e)) => {
-                                retries += 1;
-                                backoff_duration *= 2;
-                                println!("Error creating transport ends: {}", e);
-                                return;
-                            }
-                            Err(_) => {
-                                retries += 1;
-                                backoff_duration *= 2;
-                                println!("Timeout occurred while creating transport ends");
-                                return;
-                            }
-                        };
-                        
-                        let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
-                            Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
-                        context_user.disable_garbage_collection();
-                        let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-                        println!("Encoding secret image {} with proxy", index);
-                        let stegano = timeout(Duration::from_secs(60), async {
-                            std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
-                                    Ok(encoded_bytes) => Ok(encoded_bytes),
-                                    Err(e) => {
-                                        retries += 1;
-                                        backoff_duration *= 2;
-                                        println!("Error during encoding: {:?}", e);
-                                        Err(e)
-                                    }
-                                }
-                            }))
-                        }).await.unwrap_or_else(|_| Err(Box::new("Timeout occurred during encoding".to_string()) as Box<dyn std::any::Any + std::marker::Send>));
-                        
-                        // Handle the result
-                        match stegano {
-                            Ok(_) => {
-                                println!("Encoding completed successfully")
-                                
-                            },
-                            Err(e) => {
-                                retries += 1;
-                                backoff_duration *= 2;
-                                println!("Failed to encode: {:?}", e);
-                            }
-                        }
-                        drop(permit); // Release the permit
+                        let uri = format!("http://{}", server_addr);
+                        let mut client = EncoderClient::connect(uri).await.map_err(|e| e.to_string())?;
+                        println!("Encoding secret image {} on server {}...", index, server_addr);
+                        let request = tonic::Request::new(EncodeRequest {
+                            image: secret_image_bytes,
+                            output_path: stego_path,
+                            file_name: secret_file_name,
+                        });
+
+                        client.encode(request).await.map_err(|e| e.to_string())
                     });
+
                     handles.push(handle);
                 }
-        
-                let results: Vec<_> = futures::future::join_all(handles).await;
-                for result in results {
-                    match result {
-                        Ok(_) => {
-                            println!("Secret image {} processed successfully", index);
-                            success = true;
-                        },
+
+                let mut successful_response = None;
+                for handle in handles {
+                    match handle.await {
+                        Ok(Ok(response)) => {
+                            successful_response = Some(response);
+                            break;
+                        }
+                        Ok(Err(e)) => {
+                            println!("Error encoding on server: {}", e);
+                        }
                         Err(e) => {
-                            println!("Error in task: {}", e);
+                            println!("Task join error: {}", e);
                         }
                     }
                 }
-                tokio::time::sleep(backoff_duration).await;
-            }
+
+
+                if successful_response.is_none() {
+                    return Err("Failed to encode image on all servers".to_string());
+                }
+                let uri = format!("http://{}", server_addrs[0]);
+                let mut client = EncoderClient::connect(uri).await.map_err(|e| e.to_string())?;
+                println!("Encoding secret image {}...", index);
+                let start_time = std::time::Instant::now();
+                let request = tonic::Request::new(EncodeRequest {
+                    image: secret_image_bytes.clone(),
+                    output_path: stego_path.clone(),
+                    file_name: secret_file_name.clone(),
+                });
             
+                let response = client.encode(request).await.map_err(|e| e.to_string())?;
             }
             Ok::<(), String>(())
         });
@@ -232,96 +190,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     writeln!(file, "{}", process_duration.as_secs())
         .map_err(|e| format!("Failed to write to CSV file: {}", e))?;
 
-    // let steg_handle = tokio::spawn(async move{
-
-
-    //     // Load all secret images from the secret_images folder
-    //     let secret_images_path = "secret_images";
-    //     let secret_images = std::fs::read_dir(secret_images_path).map_err(|e| e.to_string())?
-    //         .filter_map(Result::ok)
-    //         .filter(|entry| entry.path().is_file())
-    //         .collect::<Vec<_>>();
-        
-        
-    //     for (index, entry) in secret_images.iter().enumerate() {
-    //         let secret_path = entry.path();
-    //         let secret_file_name = secret_path.file_name().unwrap().to_str().unwrap().to_string();
     
-    //         println!("Processing secret image {}: {}", index, secret_file_name);
-    
-    //         let secret_file = std::fs::File::open(&secret_path).unwrap();
-    //         let secret_image = file_to_bytes(secret_file);
-    //         let secret_image_bytes = &secret_image;
-    
-    //         // Generate unique output paths for each image
-    //         let stego_path = format!("encoded_images/stego_{}.png", index);
-    //         let finale_path = format!("decoded_images");
-
-    
-    //         println!("Encoding secret image {}...", index);
-    //         let start_time = std::time::Instant::now();
-    //         let mut success = false;
-            
-    //         // let stegano = image_steganographer_proxy_vector[index % image_steganographer_proxy_vector.len()].encode(secret_image_bytes, &stego_path);
-            
-            
-
-    //         while start_time.elapsed().as_secs() < 120 && !success {
-    //             let mut handles = vec![];
-
-    //             for addr in server_addrs.clone() {
-    //                 let ends = create(client_endpoint.clone(),addr).await?;
-
-    //                 let secret_image_bytes = secret_image_bytes.clone();
-    //                 let stego_path = stego_path.clone();
-    //                 let finale_path = finale_path.clone();
-    //                 let secret_file_name = secret_file_name.clone().to_string();
-
-    //                 let handle = tokio::spawn(async move {
-
-    //                     let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
-    //                             Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
-    //                         let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-    //                         println!("Encoding secret image {} with proxy", index);
-    //                         let stegano = image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name);
-    //                         match stegano {
-    //                             Ok(stegano_vec) => {
-    //                                 println!("Secret image {} encoded successfully", index);
-    //                                 let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
-    //                                 let _finale = local_steganogragrapher.decode(&stegano_vec, &finale_path, &secret_file_name).unwrap();
-
-    //                             },
-    //                             Err(e) => {
-    //                                 println!("Error encoding secret image {}: {}", index, e);
-    //                             }
-    //                         }
-                            
-                        
-    //                 });
-    //                 handles.push(handle);
-    //             }
-    
-    //             let results: Vec<_> = futures::future::join_all(handles).await;
-    //             for result in results {
-    //                 match result {
-    //                     Ok(_) => {
-    //                         println!("Secret image {} processed successfully", index);
-    //                         success = true;
-    //                     },
-    //                     Err(e) => {
-    //                         println!("Error processing secret image {}: {}", index, e);
-    //                     }
-    //                 }
-    //             }
-    //         }
-           
-            
-    //         println!("Decode method invoked successfully for secret image {}", index);
-    //     }
-    //     println!("Shutting down steg handle...");
-
-    //     Ok::<(), String>(())
-    // });
 
     
     

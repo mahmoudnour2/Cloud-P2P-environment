@@ -3,10 +3,12 @@ name = "client"
 version = "0.1.0"
 edition = "2021"
 
+
 [dependencies]
 quinn = "0.11.5" 
 quinn-proto = "0.11.5"
 tokio = { version = "1.28.1", features = ["full"] }
+tokio-stream = "0.1"
 rustls = { version = "0.23.5", default-features = false, features = ["std"] }
 rcgen = "0.13"
 anyhow = "1.0.22"
@@ -32,5 +34,10 @@ crossbeam = "0.8.4"
 smol = "2.0.2"
 futures = "0.3.31"
 stegano-core = "0.5.3"
+tonic = "*"
+prost = "0.13"
+async-stream = "0.2"
+rand = "0.8"
 
-
+[build-dependencies]
+tonic-build = "*"
