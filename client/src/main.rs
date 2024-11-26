@@ -28,7 +28,11 @@ use tokio::sync::Semaphore;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
-    
+    // Add near the start of main
+std::fs::create_dir_all("encoded_images")
+.map_err(|e| format!("Failed to create encoded_images directory: {}", e))?;
+std::fs::create_dir_all("decoded_images")
+.map_err(|e| format!("Failed to create decoded_images directory: {}", e))?;
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
         "10.7.19.102:5017".parse()?,
