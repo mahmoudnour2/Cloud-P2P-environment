@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use stegano_core::{SteganoCore,SteganoEncoder, CodecOptions};
 use std::io::Cursor;
+use minifb::{Window, WindowOptions, Key};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AccessMetadata {
@@ -45,6 +46,11 @@ pub trait ImageSteganographer: Send + Sync {
         encoded_image: &[u8],
         requester_id: &str
     ) -> Result<Vec<u8>, String>;
+    
+    fn view_decoded_image_temp(&self, 
+        encoded_image: &[u8],
+        requester_id: &str
+    ) -> Result<(), String>;
 }
 impl Service for dyn ImageSteganographer {}
 
@@ -136,7 +142,7 @@ impl ImageSteganographer for SomeImageSteganographer {
     }
 
     fn encode_with_access_rights(&self,
-        secret_image: &[u8],
+        encoded_image: &[u8],
         owner_id: &str,
         requester_id: &str,
         access_rights: u32,
@@ -158,22 +164,12 @@ impl ImageSteganographer for SomeImageSteganographer {
         std::fs::write(&temp_metadata_path, metadata_json)
             .map_err(|e| format!("Failed to write metadata: {}", e))?;
 
-        // First level of steganography: Encode the secret image
-        let temp_secret_path = format!("/tmp/secret_{}.png", requester_id);
-        let mut temp_secret_file = File::create(&temp_secret_path)
-            .map_err(|e| e.to_string())?;
-        temp_secret_file.write_all(secret_image)
-            .map_err(|e| e.to_string())?;
+        // Save the already encoded image to a temporary file
+        let temp_encoded_path = format!("/tmp/encoded_{}.png", requester_id);
+        std::fs::write(&temp_encoded_path, encoded_image)
+            .map_err(|e| format!("Failed to write encoded image: {}", e))?;
 
-        // Encode the secret image first
-        let temp_encoded_path = format!("/tmp/encoded_first_{}.png", requester_id);
-        SteganoCore::encoder()
-            .hide_file(&temp_secret_path)
-            .use_media("carrier.png").unwrap()
-            .write_to(&temp_encoded_path)
-            .hide();
-
-        // Second level: Encode both the encoded image and metadata
+        // Encode the metadata into the already encoded image
         let final_encoded_path = output_path;
         SteganoCore::encoder()
             .hide_file(&temp_metadata_path)
@@ -190,7 +186,6 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         // Cleanup temporary files
         std::fs::remove_file(&temp_metadata_path).ok();
-        std::fs::remove_file(&temp_secret_path).ok();
         std::fs::remove_file(&temp_encoded_path).ok();
 
         Ok(buffer)
@@ -262,5 +257,53 @@ impl ImageSteganographer for SomeImageSteganographer {
         std::fs::remove_file(&final_encoded_path).ok();
 
         Ok(buffer)
+    }
+
+    fn view_decoded_image_temp(&self, 
+        encoded_image: &[u8],
+        requester_id: &str
+    ) -> Result<(), String> {
+        // First decode the image and check access rights
+        let decoded_buffer = self.decode_with_access_check(encoded_image, requester_id)?;
+        
+        // Load the image from memory
+        let img = image::load_from_memory(&decoded_buffer)
+            .map_err(|e| format!("Failed to load decoded image: {}", e))?;
+        
+        // Convert to RGB
+        let rgb_img = img.to_rgb();
+        let (width, height) = rgb_img.dimensions();
+        
+        // Convert image data to u32 buffer for minifb
+        let buffer: Vec<u32> = rgb_img.pixels()
+            .map(|p| {
+                let (r, g, b) = (p[0] as u32, p[1] as u32, p[2] as u32);
+                (r << 16) | (g << 8) | b
+            })
+            .collect();
+
+        // Create window
+        let mut window = Window::new(
+            "Temporary Image Viewer - Press Escape to close",
+            width as usize,
+            height as usize,
+            WindowOptions {
+                resize: true,
+                scale: minifb::Scale::X1,
+                ..WindowOptions::default()
+            },
+        ).map_err(|e| format!("Failed to create window: {}", e))?;
+
+        // Set window update speed
+        window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+
+        // Update window while it's open
+        while window.is_open() && !window.is_key_down(Key::Escape) {
+            window
+                .update_with_buffer(&buffer, width as usize, height as usize)
+                .map_err(|e| format!("Failed to update window: {}", e))?;
+        }
+
+        Ok(())
     }
 }

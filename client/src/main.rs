@@ -192,9 +192,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         
                         // Handle the result
                         match stegano {
-                            Ok(_) => {
-                                println!("Encoding completed successfully")
-                                
+                            Ok(encoded_image) => {
+                                println!("Encoding completed successfully");
+                                // View the image temporarily
+                                let local_steganographer = SomeImageSteganographer::new(100, 10);
+                                if let Err(e) = local_steganographer.view_decoded_image_temp(
+                                    &encoded_image,
+                                    "requester456"
+                                ) {
+                                    println!("Error viewing image: {}", e);
+                                }
                             },
                             Err(e) => {
                                 retries += 1;
