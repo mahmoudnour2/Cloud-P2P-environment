@@ -154,18 +154,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
                         println!("Encoding secret image {} with proxy", index);
                         let stegano = timeout(Duration::from_secs(60), async {
-                            std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
-                                    Ok(encoded_bytes) => Ok(encoded_bytes),
-                                    Err(e) => {
-                                        retries += 1;
-                                        backoff_duration *= 2;
-                                        println!("Error during encoding: {:?}", e);
-                                        Err(e)
-                                    }
-                                }
-                            }))
-                        }).await.unwrap_or_else(|_| Err(Box::new("Timeout occurred during encoding".to_string()) as Box<dyn std::any::Any + std::marker::Send>));
+                            match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                                let owner_id = "owner123";
+                                let requester_id = "requester456";
+                                let initial_access_rights = 3;
+
+                                // First encode the secret image remotely
+                                let encoded_image = image_steganographer_proxy.encode(
+                                    &secret_image_bytes,
+                                    &stego_path,
+                                    &secret_file_name
+                                )?;
+
+                                // Then add access rights locally
+                                let local_steganographer = SomeImageSteganographer::new(100, 10);
+                                let final_encoded = local_steganographer.encode_with_access_rights(
+                                    &encoded_image,
+                                    owner_id,
+                                    requester_id,
+                                    initial_access_rights,
+                                    &stego_path
+                                )?;
+
+                                Ok(final_encoded)
+                            })) {
+                                Ok(Ok(result)) => Ok(result),
+                                Ok(Err(e)) => Err(e),
+                                Err(_) => Err(Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "Task panicked"
+                                )) as Box<dyn std::error::Error>)
+                            }
+                        }).await.unwrap_or_else(|_| Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "Timeout occurred during encoding"
+                        )) as Box<dyn std::error::Error>));
                         
                         // Handle the result
                         match stegano {
