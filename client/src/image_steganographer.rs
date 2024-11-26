@@ -159,34 +159,16 @@ impl ImageSteganographer for SomeImageSteganographer {
         let metadata_json = serde_json::to_string(&metadata)
             .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
         
-        // Create a temporary file for the metadata
-        let temp_metadata_path = format!("/tmp/metadata_{}.txt", requester_id);
-        std::fs::write(&temp_metadata_path, metadata_json)
-            .map_err(|e| format!("Failed to write metadata: {}", e))?;
-
-        // Save the already encoded image to a temporary file
-        let temp_encoded_path = format!("/tmp/encoded_{}.png", requester_id);
-        std::fs::write(&temp_encoded_path, encoded_image)
-            .map_err(|e| format!("Failed to write encoded image: {}", e))?;
-
-        // Encode the metadata into the already encoded image
-        let final_encoded_path = output_path;
-        SteganoCore::encoder()
-            .hide_file(&temp_metadata_path)
-            .use_media(&temp_encoded_path).unwrap()
-            .write_to(final_encoded_path)
-            .hide();
+        encode_and_unveil(encoded_image, &metadata_json, requester_id)?;
 
         // Read the final encoded image
-        let final_image = image::open(final_encoded_path)
+        println!("Reading the final encoded image from: {}", output_path);
+        let final_image = image::open(output_path)
             .map_err(|e| format!("Failed to open final encoded image: {}", e))?;
         let mut buffer = Vec::new();
         final_image.write_to(&mut buffer, ImageFormat::PNG)
-            .map_err(|e| format!("Failed to write to buffer: {}", e))?;
-
-        // Cleanup temporary files
-        std::fs::remove_file(&temp_metadata_path).ok();
-        std::fs::remove_file(&temp_encoded_path).ok();
+            .map_err(|e| format!("Failed to write final encoded image to buffer: {}", e))?;
+        println!("Final encoded image read successfully.");
 
         Ok(buffer)
     }
@@ -202,10 +184,12 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         // First extract the metadata
         let temp_metadata_path = format!("/tmp/extracted_metadata_{}.txt", requester_id);
+        println!("Extracting metadata to: {}", temp_metadata_path);
         let _result = unveil(
             &Path::new(&temp_encoded_path),
             &Path::new(&temp_metadata_path),
             &CodecOptions::default());
+        println!("Metadata extraction result: {:?}", _result);
 
         // Read and parse metadata
         let metadata_str = std::fs::read_to_string(&temp_metadata_path)
@@ -306,4 +290,47 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         Ok(())
     }
+}
+
+fn encode_and_unveil(encoded_image: &[u8], metadata_json: &str, requester_id: &str) -> Result<(), String> {
+    // Create a temporary file for the metadata
+    let temp_metadata_path = format!("/tmp/metadata_{}.txt", requester_id);
+    println!("Creating metadata file at: {}", temp_metadata_path);
+    std::fs::write(&temp_metadata_path, metadata_json)
+        .map_err(|e| format!("Failed to write metadata: {}", e))?;
+    println!("Metadata file created successfully.");
+
+    // Save the already encoded image to a temporary file
+    let temp_encoded_path = format!("/tmp/encoded_{}.png", requester_id);
+    println!("Creating encoded image file at: {}", temp_encoded_path);
+    std::fs::write(&temp_encoded_path, encoded_image)
+        .map_err(|e| format!("Failed to write encoded image: {}", e))?;
+    println!("Encoded image file created successfully.");
+
+    // Encode the metadata into the already encoded image
+    let final_encoded_path = format!("/tmp/final_encoded_{}.png", requester_id);
+    println!("Encoding metadata into the encoded image.");
+    SteganoCore::encoder()
+        .hide_file(&temp_metadata_path)
+        .use_media(&temp_encoded_path).unwrap()
+        .write_to(&final_encoded_path)
+        .hide();
+    println!("Metadata encoded successfully into the image.");
+
+    // Verify that the files exist before unveiling
+    if !Path::new(&final_encoded_path).exists() {
+        return Err(format!("Final encoded image does not exist: {}", final_encoded_path));
+    }
+    if !Path::new(&temp_metadata_path).exists() {
+        return Err(format!("Metadata file does not exist: {}", temp_metadata_path));
+    }
+
+    // Unveil the metadata from the encoded image
+    let _result = unveil(
+        &Path::new(&final_encoded_path),
+        &Path::new(&temp_metadata_path),
+        &CodecOptions::default());
+    println!("Metadata extraction result: {:?}", _result);
+
+    Ok(())
 }

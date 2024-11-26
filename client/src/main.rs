@@ -31,9 +31,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.16.154:5017".parse()?,
+        "10.7.19.102:5017".parse()?,
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.17.170:0".parse()?;  // Listen on this port
+    let client_addr: SocketAddr = "10.7.19.179:0".parse()?;  // Listen on this port
 
     println!("Quinn endpoints setup beginning.");
 
@@ -107,7 +107,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let secret_image_bytes = &secret_image;
         
             // Generate unique output paths for each image
-            let stego_path = format!("encoded_images/stego_{}.png", secret_file_name);
+            let stego_path = format!("stego_{}.png", secret_file_name);
+            let stego_with_rights_path = format!("stego_with_access_rights_{}.png", secret_file_name);
             let finale_path = format!("decoded_images");
         
             println!("Encoding secret image {}...", index);
@@ -126,6 +127,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let client_endpoint = client_endpoint.clone();
                     let secret_image_bytes = secret_image_bytes.clone();
                     let stego_path = stego_path.clone();
+                    let stego_with_rights_path = stego_with_rights_path.clone();
                     let finale_path = finale_path.clone();
                     let secret_file_name = secret_file_name.clone();
                     let semaphore = semaphore.clone();
@@ -173,7 +175,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     owner_id,
                                     requester_id,
                                     initial_access_rights,
-                                    &stego_path
+                                    &stego_with_rights_path
                                 )?;
 
                                 Ok(final_encoded)
@@ -192,12 +194,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         
                         // Handle the result
                         match stegano {
-                            Ok(encoded_image) => {
+                            Ok(final_encoded) => {
                                 println!("Encoding completed successfully");
                                 // View the image temporarily
                                 let local_steganographer = SomeImageSteganographer::new(100, 10);
                                 if let Err(e) = local_steganographer.view_decoded_image_temp(
-                                    &encoded_image,
+                                    &final_encoded,
                                     "requester456"
                                 ) {
                                     println!("Error viewing image: {}", e);
