@@ -40,20 +40,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let server_addrs: Vec<&str> = vec![
         "fe80::4ed7:17ff:fe7f:d11b:5017",
     ];  // Connect to server's ports
-    //let client_addr: SocketAddr = "fe80::4ed7:17ff:fe7d:ef1e:0".parse()?;  // Listen on this port
-
-    println!("Quinn endpoints setup beginning.");
-
-    //let (server_endpoint, _server_cert) = make_server_endpoint(server_addr).unwrap();
-    
-
-    
-
-
-    println!("Quinn endpoints setup successfully.");
-
-    // Create transport ends
-    println!("Creating transport ends.");
 
 
     // Load all secret images from the secret_images folder

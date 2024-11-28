@@ -6,29 +6,19 @@ use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, ServiceToExport, Config};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-
-mod transport;
-mod image_steganographer;
-mod quinn_utils;
-mod cloud_leader_election;
-use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
-use image;
-use transport::{create, TransportEnds};
-use quinn_utils::*;
-use quinn_proto::crypto::rustls::QuicClientConfig;
-use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
+use tonic::{transport::Server, Request, Response, Status};
 use futures::{FutureExt, StreamExt};
-use tokio::time::{timeout, Duration};
-use tokio::task::spawn_blocking;
 use tokio::sync::{Mutex, Semaphore};
 use std::collections::{HashMap, VecDeque};
+use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
+use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
+use std::sync::Arc;
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-
     // Setup Quinn endpoints for Node
     let server_addr_leader_election: SocketAddr = "10.7.19.117:5016".parse()?;
     let peer_servers_leader_election: Vec<SocketAddr> = vec![
@@ -36,17 +26,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "10.7.16.71:5016".parse()?,
     ];
 
-    // Setup Quinn endpoints for steganographer
+    // Setup Quinn endpoints for steganography (These can be your server IPs for steganography service)
     let server_addrs: Vec<&str> = vec![
-        "fe80::4ed7:17ff:fe7f:d11b",
+        "fe80::4ed7:17ff:fe7f:d11b",  // Example address
     ];
 
     println!("Quin node is beginning setup");
     let my_id = 2; // Make sure this matches your node ID
     PERSONAL_ID.store(my_id as u64, AtomicOrdering::Relaxed);
 
+    // Setup your Quinn node for leader election and message passing
     let mut quinn_node = Node::new(my_id, server_addr_leader_election, peer_servers_leader_election).await?;
-    // Spawn the Node task
+    
+    // Spawn Quinn node task
     let node_handle = tokio::spawn(async move {
         quinn_node.run().await;
         tokio::signal::ctrl_c().await.map_err(|e| Box::new(e) as Box<dyn Error + Send>)?;
@@ -54,134 +46,81 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok::<(), Box<dyn Error + Send>>(())
     });
 
-    
-    println!("Steganography service endpoints are setup");
+    // Setup gRPC service (for image steganography)
+    let image_steg_service = ImageSteganographyService {
+        semaphore: Arc::new(Semaphore::new(10)),  // Limit to 10 concurrent requests
+    };
 
+    // Create and start gRPC server
+    let grpc_addr = "[::]:50051".parse::<SocketAddr>()?;
+    Server::builder()
+        .add_service(image_steg_service)
+        .serve(grpc_addr)
+        .await?;
 
-    let connection_handle = tokio::spawn(async move {
-        loop {
-            // Check if this node is the current leader
-            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-            for endpoint in &server_endpoints {
-                match timeout(Duration::from_secs(1), endpoint.accept()).await {
-                    Ok(Some(incoming)) => {
-                        println!("Received a connection request from client");
-                        //incoming.await accepts the connection
-                        match incoming.await {
-                            Ok(conn) => {
-                                let ends = match create(conn).await {
-                                    Ok(ends) => ends,
-                                    Err(e) => {
-                                        eprintln!("Failed to create transport ends: {}", e);
-                                        continue;
-                                    }
-                                };
-                                let mut vec = transport_ends_vec_clone.lock().await;
-                                vec.push(ends);
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to accept incoming connection: {}", e);
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        println!("Server endpoint has stopped accepting new connections");
-                        // No incoming connection within the timeout duration
-                    }
-                    Err(e) => {
-                        eprintln!("Error accepting incoming connection: {}", e);
-                    }
-                }
-            }
-            let ctrl_c_timeout = Duration::from_secs(1);
-            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
-                Ok(Ok(())) => {
-                    break;
-                }
-                Ok(Err(e)) => {
-                    println!("Error waiting for Ctrl+C: {}", e);
-                }
-                Err(_) => {
-                    // Timeout occurred, continue the loop
-                }
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-
-        // Wait for Ctrl-C
-        tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
-        println!("Shutting down connection handle...");
-        Ok::<(), String>(())
-    });
-
-
-    let contexts: Arc<Mutex<HashMap<TransportEnds, Context>>> = Arc::new(Mutex::new(HashMap::new()));
-
-    // Spawn the steganographer service task
-    let steg_handle = tokio::spawn(async move {
-        
-        loop {
-            let mut contexts = contexts.lock().await;
-            println!("{}",contexts.len());
-            let mut vec = transport_ends_vec.lock().await;
-            vec.retain(|ends| {
-                if ends.is_active() {
-                    
-                    // Only create and export the service if this node is the leader and the context doesn’t already exist
-                    if !contexts.contains_key(ends) {
-                        let context = Context::with_initial_service_export(
-                            Config::default_setup(),
-                            ends.send.clone(),
-                            ends.recv.clone(),
-                            ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-                        );
-                        contexts.insert(ends.clone(), context);
-                        println!("Steganographer service started for client {:?}", ends.get_remote_address());
-                    }
-                    
-                    true
-                } else {
-                    // Remove context if the connection is no longer active
-                    if contexts.remove(ends).is_some() {
-                        println!("Context removed for inactive connection {:?}", ends);
-                    }
-                    false
-                }
-            });
-            drop(vec); // Release the lock before sleeping
-
-            let ctrl_c_timeout = Duration::from_secs(1);
-            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
-                Ok(Ok(())) => {
-                    break;
-                }
-                Ok(Err(e)) => {
-                    println!("Error waiting for Ctrl+C: {}", e);
-                }
-                Err(_) => {
-                    // Timeout occurred, continue the loop
-                }
-            }
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-
-        // Wait for Ctrl-C
-        tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
-        println!("Shutting down steg handle...");
-
-        Ok::<(), String>(())
-    });
-
-    // Wait for Ctrl-C
-
+    // Wait for Ctrl-C signal to shutdown the server gracefully
     tokio::signal::ctrl_c().await?;
     println!("Shutting down server...");
 
     // Await both handles to ensure clean shutdown
-    let _ = tokio::join!(node_handle, steg_handle,connection_handle);
+    let _ = tokio::join!(node_handle);
 
     Ok(())
-} 
+}
+
+// Define your gRPC service implementation
+#[derive(Debug, Default)]
+pub struct ImageSteganographyService {
+    semaphore: Arc<Semaphore>,  // Semaphore to control concurrency
+}
+
+#[tonic::async_trait]
+impl ImageSteganographer for ImageSteganographyService {
+    async fn encode(
+        &self,
+        request: Request<EncodeRequest>,
+    ) -> Result<Response<EncodeReply>, Status> {
+        let _permit = self.semaphore.acquire().await.unwrap();  // Acquire semaphore permit for concurrent requests
+
+        let encode_request = request.into_inner();
+        let secret_image = encode_request.secret_image;
+        let output_path = encode_request.output_path;
+        let file_name = encode_request.file_name;
+
+        // Instantiate the steganographer (the encoder)
+        let encoder = SomeImageSteganographer::new(90, 5);  // Example compression quality and pixel diff
+        match encoder.encode(&secret_image, &output_path, &file_name) {
+            Ok(encoded_image) => {
+                let reply = EncodeReply {
+                    encoded_image,  // Return the encoded image buffer
+                };
+                Ok(Response::new(reply))
+            }
+            Err(err) => Err(Status::internal(err)),
+        }
+    }
+
+    async fn decode(
+        &self,
+        request: Request<DecodeRequest>,
+    ) -> Result<Response<DecodeReply>, Status> {
+        let _permit = self.semaphore.acquire().await.unwrap();  // Acquire semaphore permit
+
+        let decode_request = request.into_inner();
+        let encoded_image = decode_request.encoded_image;
+        let decoded_image_path = decode_request.decoded_image_path;
+        let file_name = decode_request.file_name;
+
+        // Instantiate the steganographer (the decoder)
+        let decoder = SomeImageSteganographer::new(90, 5);  // Example compression quality and pixel diff
+        match decoder.decode(&encoded_image, &decoded_image_path, &file_name) {
+            Ok(decoded_image) => {
+                let reply = DecodeReply {
+                    decoded_image,  // Return the decoded image buffer
+                };
+                Ok(Response::new(reply))
+            }
+            Err(err) => Err(Status::internal(err)),
+        }
+    }
+}
