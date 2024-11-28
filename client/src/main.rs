@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
     let server_addrs: Vec<&str> = vec![
-        "fe80::4ed7:17ff:fe7f:d11b:5017",
+        "[::1]:50051",
     ];  // Connect to server's ports
 
 
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut stego_portions = vec![];
-    let semaphore = Arc::new(Semaphore::new(5)); // Limit to 5 concurrent requests
+
     let process_start_time = std::time::Instant::now();
 
     for chunk in secret_images_chunks.into_iter() {
@@ -100,15 +100,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let handle = tokio::spawn(async move {
                         let uri = format!("http://{}", server_addr);
-                        let mut client = EncoderClient::connect(uri).await.map_err(|e| e.to_string())?;
+                        let mut client = EncoderClient::connect(uri)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        
+                        client = client
+                            .max_encoding_message_size(50 * 1024 * 1024) // Set max encoding size to 10 MB
+                            .max_decoding_message_size(50 * 1024 * 1024); // Set max decoding size to 10 MB
+                        
                         println!("Encoding secret image {} on server {}...", index, server_addr);
-                        let request = tonic::Request::new(EncodeRequest {
-                            image: secret_image_bytes,
-                            output_path: stego_path,
-                            file_name: secret_file_name,
-                        });
+                        
 
-                        client.encode(request).await.map_err(|e| e.to_string())
+                        let mut retries = 0;
+                        let max_retries = 3;
+                        let mut response = None;
+
+                        while retries < max_retries {
+                            let request = tonic::Request::new(EncodeRequest {
+                                image: secret_image_bytes.clone(),
+                                output_path: stego_path.clone(),
+                                file_name: secret_file_name.clone(),
+                            });
+                            match client.encode(request).await {
+                                Ok(res) => {
+                                    response = Some(res);
+                                    break;
+                                }
+                                Err(e) => {
+                                    println!("Error encoding on server {}: {}. Retrying... ({}/{})", server_addr, e, retries + 1, max_retries);
+                                    retries += 1;
+                                }
+                            }
+                        }
+
+                        response.ok_or_else(|| "Failed to encode image after 3 retries".to_string())
                     });
 
                     handles.push(handle);
@@ -134,17 +159,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if successful_response.is_none() {
                     return Err("Failed to encode image on all servers".to_string());
                 }
-                let uri = format!("http://{}", server_addrs[0]);
-                let mut client = EncoderClient::connect(uri).await.map_err(|e| e.to_string())?;
-                println!("Encoding secret image {}...", index);
-                let start_time = std::time::Instant::now();
-                let request = tonic::Request::new(EncodeRequest {
-                    image: secret_image_bytes.clone(),
-                    output_path: stego_path.clone(),
-                    file_name: secret_file_name.clone(),
-                });
-            
-                let response = client.encode(request).await.map_err(|e| e.to_string())?;
             }
             Ok::<(), String>(())
         });
