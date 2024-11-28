@@ -11,8 +11,13 @@ use tokio::sync::{Mutex};
 use std::collections::{HashMap, VecDeque};
 mod cloud_leader_election;
 use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
+
 use image_steganographer::encoder_server::{Encoder, EncoderServer};
 use image_steganographer::{EncodeRequest, EncodeReply};
+use port_grabber::port_grabber_server::{PortGrabber, PortGrabberServer};
+use port_grabber::{PortRequest, PortReply};
+
+
 use std::sync::Arc;
 mod quinn_utils;
 use quinn_utils::*;
@@ -23,6 +28,13 @@ use rand::Rng;
 use image::ImageFormat;
 use std::fs::File;
 use std::io::{Read, Write};
+use local_ip_address::local_ip;
+use std::net::IpAddr;
+use std::net::UdpSocket;
+
+pub mod port_grabber {
+    tonic::include_proto!("port_grabber");
+}
 
 pub mod image_steganographer {
     tonic::include_proto!("steganography");
@@ -63,9 +75,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create and start gRPC server
     let grpc_addr = "[::]:50051".parse::<SocketAddr>()?;
-    let image_steg_service = ImageSteganographyService::default();
+    let port_grabber_service = PortGrabberService::default();
     Server::builder()
-        .add_service(EncoderServer::new(image_steg_service))
+        .add_service(PortGrabberServer::new(port_grabber_service))
         .serve(grpc_addr)
         .await?;
 
@@ -77,6 +89,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _ = tokio::join!(node_handle);
 
     Ok(())
+}
+
+#[derive(Debug, Default)]
+pub struct PortGrabberService {}
+
+#[tonic::async_trait]
+impl PortGrabber for PortGrabberService {
+    async fn get_port(
+        &self,
+        request: Request<PortRequest>,
+    ) -> Result<Response<PortReply>, Status> {
+        let _port_request = request.into_inner();
+        let local_ip: IpAddr = local_ip().unwrap();
+        let local_addr = SocketAddr::new(local_ip, 0);
+
+        let socket = UdpSocket::bind(local_addr).map_err(|e| Status::internal(e.to_string()))?;
+        let final_addr = socket.local_addr().map_err(|e| Status::internal(e.to_string()))?;
+        println!("Assigned port: {}", final_addr.port());
+        std::mem::drop(socket);
+
+        // Spawn a new task for the ImageSteganographyService server
+        tokio::spawn(async move {
+            let final_addr = final_addr.clone();
+            let grpc_addr = format!("[::]:{}", final_addr.port()).parse::<SocketAddr>().unwrap();
+            let image_steg_service = ImageSteganographyService::default();
+            let server = Server::builder()
+            .add_service(EncoderServer::new(image_steg_service))
+            .serve(grpc_addr);
+
+            // Run the server with a timeout of 200 seconds
+            let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(200));
+            tokio::select! {
+            _ = server => {},
+            _ = timeout => {
+                println!("ImageSteganographyService server shutting down after 200 seconds");
+            },
+            }
+        });
+
+        let addr = format!("{}", final_addr);
+        let reply = PortReply {
+            port: addr,
+        };
+
+        Ok(Response::new(reply))
+    }
 }
 
 
@@ -95,6 +153,10 @@ impl Encoder for ImageSteganographyService {
         let output_path = encode_request.output_path;
         let file_name = encode_request.file_name;
 
+
+        if (CURRENT_LEADER_ID.load(AtomicOrdering::Relaxed) != PERSONAL_ID.load(AtomicOrdering::Relaxed)) {
+            return Err(Status::internal("Not the leader"));
+        }
 
         println!("Beginning Encoding");
 

@@ -22,11 +22,19 @@ use std::env;
 use std::process::{Command, exit};
 use std::fs::OpenOptions;
 use std::io::Write;
-use tokio::sync::Semaphore;
+
+use port_grabber::port_grabber_client::PortGrabberClient;
+use port_grabber::PortRequest;
+use port_grabber::PortReply;
 
 use image_steganographer::encoder_client::EncoderClient;
 use image_steganographer::EncodeRequest;
 use image_steganographer::EncodeReply;
+
+
+pub mod port_grabber {
+    tonic::include_proto!("port_grabber");
+}
 
 pub mod image_steganographer {
     tonic::include_proto!("steganography");
@@ -100,6 +108,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let handle = tokio::spawn(async move {
                         let uri = format!("http://{}", server_addr);
+
+                        let mut client = PortGrabberClient::connect(uri)
+                            .await
+                            .map_err(|e| e.to_string())?;
+
+                        let request = tonic::Request::new(PortRequest { });
+                        let response = client.get_port(request).await
+                            .map_err(|e| e.to_string())?;
+
+
+                        let uri = format!("http://{}",response.get_ref().port);
+                        println!("{}",uri);
+
                         let mut client = EncoderClient::connect(uri)
                             .await
                             .map_err(|e| e.to_string())?;
@@ -116,12 +137,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut response = None;
 
                         while retries < max_retries {
-                            let request = tonic::Request::new(EncodeRequest {
+                            
+                            let stego_request = tonic::Request::new(EncodeRequest {
                                 image: secret_image_bytes.clone(),
                                 output_path: stego_path.clone(),
                                 file_name: secret_file_name.clone(),
                             });
-                            match client.encode(request).await {
+                            match client.encode(stego_request).await {
                                 Ok(res) => {
                                     response = Some(res);
                                     break;
