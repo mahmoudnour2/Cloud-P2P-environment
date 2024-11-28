@@ -1,9 +1,9 @@
 use crossbeam::channel::{bounded, Receiver, Select, SelectTimeoutError, Sender};
-use remote_trait_object::transport::*;
 use log::debug;
-use quinn::{Endpoint, ClientConfig, ServerConfig, Connection, SendStream, RecvStream};
-use std::sync::Arc;
+use quinn::{ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig};
+use remote_trait_object::transport::*;
 use std::error::Error;
+use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 // Custom transport error types
@@ -28,7 +28,6 @@ pub struct QuinnSend {
     runtime: Arc<Runtime>,
 }
 
-
 impl TransportSend for QuinnSend {
     fn send(
         &self,
@@ -37,14 +36,17 @@ impl TransportSend for QuinnSend {
     ) -> Result<(), TransportError> {
         let data = data.to_vec();
         self.runtime.block_on(async {
-            let (mut send, _recv) = self.connection.open_bi().await
+            let (mut send, _recv) = self
+                .connection
+                .open_bi()
+                .await
                 .map_err(|e| TransportError::Custom)?;
-            
-            send.write_all(&data).await
+
+            send.write_all(&data)
+                .await
                 .map_err(|e| TransportError::Custom)?;
-            
-            send.finish()
-                .map_err(|e| TransportError::Custom)
+
+            send.finish().map_err(|e| TransportError::Custom)
         })
     }
 
@@ -63,15 +65,20 @@ pub struct QuinnRecv {
 impl TransportRecv for QuinnRecv {
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, TransportError> {
         self.runtime.block_on(async {
-            let (_, mut recv) = self.connection.accept_bi().await
+            let (_, mut recv) = self
+                .connection
+                .accept_bi()
+                .await
                 .map_err(|e| TransportError::Custom)?;
-            
-                let mut buffer = Vec::new();
-                let max_size = 30*1024 * 1024; // 30MB max size, adjust as needed
-                buffer = recv.read_to_end(max_size).await
-                    .map_err(|e| TransportError::Custom)?;
-                
-                Ok(buffer)
+
+            let mut buffer = Vec::new();
+            let max_size = 30 * 1024 * 1024; // 30MB max size, adjust as needed
+            buffer = recv
+                .read_to_end(max_size)
+                .await
+                .map_err(|e| TransportError::Custom)?;
+
+            Ok(buffer)
         })
     }
 
@@ -98,15 +105,17 @@ pub struct TransportEnds {
 }
 
 // Create function now establishes Quinn connections
-pub async fn create(server_endpoint: Endpoint, client_endpoint: Endpoint) -> Result<TransportEnds, Box<dyn Error>> {
+pub async fn create(
+    server_endpoint: Endpoint,
+    client_endpoint: Endpoint,
+) -> Result<TransportEnds, Box<dyn Error>> {
     let runtime = Arc::new(Runtime::new()?);
-    
+
     // Establish connections
     let server_conn = server_endpoint.accept().await.unwrap().await?;
-    let client_conn = client_endpoint.connect(
-        server_endpoint.local_addr()?,
-        "localhost",
-    )?.await?;
+    let client_conn = client_endpoint
+        .connect(server_endpoint.local_addr()?, "localhost")?
+        .await?;
 
     Ok(TransportEnds {
         send1: QuinnSend {

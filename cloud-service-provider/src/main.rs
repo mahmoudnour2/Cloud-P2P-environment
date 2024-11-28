@@ -10,12 +10,10 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Barrier};
 use remote_trait_object::{Context, Config, ServiceToExport, ServiceToImport};
 use std::error::Error;
-use main2::main2;
 //use remote_trait_object::transport::{TransportSend, TransportRecv};
 use transport::create;
 use transport::TransportEnds;
 mod transport;
-mod main2;
 
 
 fn main() {
