@@ -1,0 +1,14 @@
+syntax = "proto3";
+package port_grabber;
+
+service PortGrabber {
+    rpc GetPort (PortRequest) returns (PortReply);
+}
+
+message PortRequest {
+
+}
+
+message PortReply {
+    string port = 1;
+}
