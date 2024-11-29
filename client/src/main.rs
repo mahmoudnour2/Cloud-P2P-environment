@@ -23,7 +23,19 @@ use std::env;
 use std::process::{Command, exit};
 use std::fs::OpenOptions;
 use std::io::Write;
-use tokio::sync::Semaphore;
+use laminar::{Packet, Socket, SocketEvent};
+use std::thread;
+use local_ip_address::local_ip;
+use std::net::IpAddr;
+use std::net::UdpSocket;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StegoRequest {
+    pub secret_image: Vec<u8>,
+    pub output_path: String,
+    pub file_name: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -37,26 +49,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "10.7.17.170:0".parse()?;  // Listen on this port
 
-    println!("Quinn endpoints setup beginning.");
 
-    //let (server_endpoint, _server_cert) = make_server_endpoint(server_addr).unwrap();
-    
-
-    let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
-        rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(SkipServerVerification::new())
-            .with_no_client_auth(),
-    )?));
-    let mut transport_config = TransportConfig::default();
-    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
-    client_config.transport_config(Arc::new(transport_config));
-
-    let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
-    client_endpoint.set_default_client_config(client_config);
-
-
-    println!("Quinn endpoints setup successfully.");
 
     // Create transport ends
     println!("Creating transport ends.");
@@ -83,14 +76,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut stego_portions = vec![];
-    let semaphore = Arc::new(Semaphore::new(5)); // Limit to 5 concurrent requests
+
     let process_start_time = std::time::Instant::now();
 
     for chunk in secret_images_chunks.into_iter() {
         let secret_images = chunk.clone();
         let server_addrs = server_addrs.clone();
-        let client_endpoint = client_endpoint.clone();
-        let semaphore = semaphore.clone();
+
 
         let stego_portion = tokio::spawn(async move {
             for (index, entry) in secret_images.iter().enumerate() {
@@ -125,63 +117,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 for addr in server_addrs.clone() {
                     
                     
-                    let client_endpoint = client_endpoint.clone();
+
                     let secret_image_bytes = secret_image_bytes.clone();
                     let stego_path = stego_path.clone();
                     let finale_path = finale_path.clone();
                     let secret_file_name = secret_file_name.clone();
-                    let semaphore = semaphore.clone();
+
+                    // Creates the socket
+                    let mut socket = Socket::bind("127.0.0.1:12345")?;
+                    let packet_sender = socket.get_packet_sender();
+                    // Starts the socket, which will start a poll mechanism to receive and send messages.
+                    let _thread = thread::spawn(move || socket.start_polling());
+
+                    // Bytes to sent
+                    let bytes = 
             
                     let handle = tokio::spawn(async move {
-                        let permit = semaphore.acquire().await.unwrap(); // Acquire a permit
-                        let ends = match timeout(Duration::from_secs(10), create(client_endpoint.clone(), addr)).await {
-                            Ok(Ok(ends)) => ends,
-                            Ok(Err(e)) => {
-                                retries += 1;
-                                backoff_duration *= 2;
-                                println!("Error creating transport ends: {}", e);
-                                return;
-                            }
-                            Err(_) => {
-                                retries += 1;
-                                backoff_duration *= 2;
-                                println!("Timeout occurred while creating transport ends");
-                                return;
-                            }
-                        };
                         
-                        let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
-                            Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
-                        context_user.disable_garbage_collection();
-                        let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-                        println!("Encoding secret image {} with proxy", index);
-                        let stegano = timeout(Duration::from_secs(60), async {
-                            std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                match image_steganographer_proxy.encode(&secret_image_bytes, &stego_path, &secret_file_name) {
-                                    Ok(encoded_bytes) => Ok(encoded_bytes),
-                                    Err(e) => {
-                                        retries += 1;
-                                        backoff_duration *= 2;
-                                        println!("Error during encoding: {:?}", e);
-                                        Err(e)
-                                    }
-                                }
-                            }))
-                        }).await.unwrap_or_else(|_| Err(Box::new("Timeout occurred during encoding".to_string()) as Box<dyn std::any::Any + std::marker::Send>));
                         
-                        // Handle the result
-                        match stegano {
-                            Ok(_) => {
-                                println!("Encoding completed successfully")
-                                
-                            },
-                            Err(e) => {
-                                retries += 1;
-                                backoff_duration *= 2;
-                                println!("Failed to encode: {:?}", e);
-                            }
-                        }
-                        drop(permit); // Release the permit
+                        
+                        
+
+
                     });
                     handles.push(handle);
                 }

@@ -1,6 +1,6 @@
 use quinn::{Endpoint, ServerConfig, TransportConfig, ClientConfig};
 use rand::seq::index;
-use rustls::server;
+use rustls::{client, server};
 use std::error::Error;
 use std::net::SocketAddr;
 use remote_trait_object::{Context, Service, ServiceToExport, Config};
@@ -22,6 +22,19 @@ use tokio::time::{timeout, Duration};
 use tokio::task::spawn_blocking;
 use tokio::sync::{Mutex, Semaphore};
 use std::collections::{HashMap, VecDeque};
+use laminar::{Socket, Packet, SocketEvent};
+use std::thread;
+use local_ip_address::local_ip;
+use std::net::IpAddr;
+use std::net::UdpSocket;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StegoRequest {
+    pub secret_image: Vec<u8>,
+    pub output_path: String,
+    pub file_name: String,
+}
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
@@ -56,120 +69,130 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     
     let mut server_endpoints = Vec::new();
-    for addr in server_addrs {
+    for addr in server_addrs.clone() {
         let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
         server_endpoints.push(endpoint);
     }
     println!("Steganography service endpoints are setup");
 
-    let transport_ends_vec = Arc::new(Mutex::new(Vec::new()));
-    let transport_ends_vec_clone = Arc::clone(&transport_ends_vec);
 
-    let connection_handle = tokio::spawn(async move {
-        loop {
-            // Check if this node is the current leader
-            if CURRENT_LEADER_ID.load(AtomicOrdering::SeqCst) != my_id {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-            for endpoint in &server_endpoints {
-                match timeout(Duration::from_secs(1), endpoint.accept()).await {
-                    Ok(Some(incoming)) => {
-                        println!("Received a connection request from client");
-                        //incoming.await accepts the connection
-                        match incoming.await {
-                            Ok(conn) => {
-                                let ends = match create(conn).await {
-                                    Ok(ends) => ends,
-                                    Err(e) => {
-                                        eprintln!("Failed to create transport ends: {}", e);
-                                        continue;
-                                    }
-                                };
-                                let mut vec = transport_ends_vec_clone.lock().await;
-                                vec.push(ends);
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to accept incoming connection: {}", e);
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        println!("Server endpoint has stopped accepting new connections");
-                        // No incoming connection within the timeout duration
-                    }
-                    Err(e) => {
-                        eprintln!("Error accepting incoming connection: {}", e);
-                    }
-                }
-            }
-            let ctrl_c_timeout = Duration::from_secs(1);
-            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
-                Ok(Ok(())) => {
-                    break;
-                }
-                Ok(Err(e)) => {
-                    println!("Error waiting for Ctrl+C: {}", e);
-                }
-                Err(_) => {
-                    // Timeout occurred, continue the loop
-                }
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-
-        // Wait for Ctrl-C
-        tokio::signal::ctrl_c().await.map_err(|e| e.to_string())?;
-        println!("Shutting down connection handle...");
-        Ok::<(), String>(())
-    });
-
-
-    let contexts: Arc<Mutex<HashMap<TransportEnds, Context>>> = Arc::new(Mutex::new(HashMap::new()));
 
     // Spawn the steganographer service task
     let steg_handle = tokio::spawn(async move {
-        
-        loop {
-            let mut contexts = contexts.lock().await;
-            println!("{}",contexts.len());
-            let mut vec = transport_ends_vec.lock().await;
-            vec.retain(|ends| {
-                if ends.is_active() {
-                    
-                    // Only create and export the service if this node is the leader and the context doesn’t already exist
-                    if !contexts.contains_key(ends) {
-                        let context = Context::with_initial_service_export(
-                            Config::default_setup(),
-                            ends.send.clone(),
-                            ends.recv.clone(),
-                            ServiceToExport::new(Box::new(SomeImageSteganographer::new(75, 10)) as Box<dyn ImageSteganographer>),
-                        );
-                        contexts.insert(ends.clone(), context);
-                        println!("Steganographer service started for client {:?}", ends.get_remote_address());
-                    }
-                    
-                    true
-                } else {
-                    // Remove context if the connection is no longer active
-                    if contexts.remove(ends).is_some() {
-                        println!("Context removed for inactive connection {:?}", ends);
-                    }
-                    false
-                }
-            });
-            drop(vec); // Release the lock before sleeping
+        let server_addrs = server_addrs.clone();
 
-            let ctrl_c_timeout = Duration::from_secs(1);
-            match timeout(ctrl_c_timeout, tokio::signal::ctrl_c()).await {
-                Ok(Ok(())) => {
-                    break;
+        // Creates the socket
+        let mut socket = Socket::bind(server_addrs[0]).map_err(|e| e.to_string())?;
+        let event_receiver = socket.get_event_receiver();
+        let packet_sender = socket.get_packet_sender();
+        // Starts the socket, which will start a poll mechanism to receive and send messages.
+        let _thread = thread::spawn(move || socket.start_polling());
+
+
+
+        
+
+        
+
+        loop {
+            // Waits until a socket event occurs
+            let result = event_receiver.recv();
+
+            match result {
+                Ok(socket_event) => {
+                    match socket_event {
+                        SocketEvent::Packet(packet) => {
+                            let endpoint: SocketAddr = packet.addr();
+                            let received_data: &[u8] = packet.payload();
+
+                            let local_ip: IpAddr = local_ip().unwrap();
+                            let local_addr = SocketAddr::new(local_ip, 0);
+
+                            let socket = UdpSocket::bind(local_addr).map_err(|e| e.to_string())?;
+                            let actual_addr = socket.local_addr().map_err(|e| e.to_string())?;
+                            println!("Assigned port: {}", actual_addr.port());
+                            std::mem::drop(socket);
+
+                            let addr = format!("{}", actual_addr);
+                            let response_packet = Packet::reliable_ordered(endpoint, addr.as_bytes().to_vec(), None);
+                            packet_sender.send(response_packet).map_err(|e| e.to_string())?;
+
+                            let steg_handle = tokio::spawn(async move {
+                                
+                                // Creates the socket
+                                let mut socket = Socket::bind(actual_addr).map_err(|e| e.to_string());
+                                let mut socket = match socket {
+                                    Ok(socket) => socket,
+                                    Err(e) => {
+                                        println!("Error binding socket: {:?}", e);
+                                        return;
+                                    }
+                                };
+                                let event_receiver_steg = socket.get_event_receiver();
+                                let packet_sender_steg = socket.get_packet_sender();
+                                // Starts the socket, which will start a poll mechanism to receive and send messages.
+                                let _thread = thread::spawn(move || socket.start_polling());
+
+                                let result = event_receiver_steg.recv();
+
+                                match result {
+                                    Ok(socket_event) => {
+                                        match socket_event {
+                                            SocketEvent::Packet(packet) => {
+                                                let endpoint: SocketAddr = packet.addr();
+                                                let received_data: &[u8] = packet.payload();
+
+                                                let stego_request = bincode::deserialize(received_data).map_err(|e| e.to_string());
+                                                let stego_request: StegoRequest = match stego_request {
+                                                    Ok(request) => request,
+                                                    Err(e) => {
+                                                        println!("Error deserializing request: {:?}", e);
+                                                        return;
+                                                    }
+                                                };
+                                                let steganographer = SomeImageSteganographer::new(90,90);
+                                                let secret_image = stego_request.secret_image;
+                                                let output_path = stego_request.output_path;
+                                                let file_name = stego_request.file_name;
+                                                let encoded_buffer = steganographer.encode(&secret_image, &output_path, &file_name).map_err(|e| e.to_string());
+                                                let encoded_buffer = match encoded_buffer {
+                                                    Ok(buffer) => buffer,
+                                                    Err(e) => {
+                                                        println!("Error encoding image: {:?}", e);
+                                                        Vec::new()
+                                                    }
+                                                };
+
+                                                let response_packet = Packet::reliable_ordered(endpoint, encoded_buffer, None);
+                                                packet_sender_steg.send(response_packet).map_err(|e| e.to_string());
+                                            }
+                                            SocketEvent::Connect(connect_event) => { /* a client connected */ }
+                                            SocketEvent::Timeout(timeout_event) => { /* a client timed out */ }
+                                            SocketEvent::Disconnect(disconnect_event) => { /* a client disconnected */ }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("Something went wrong when receiving, error: {:?}", e);
+                                    }
+                                }
+                            });
+
+                            // Spawn a task to delete the thread after 200 seconds
+                            tokio::spawn(async move {
+                                tokio::time::sleep(Duration::from_secs(200)).await;
+                                steg_handle.abort();
+                            });
+                        }
+                        SocketEvent::Connect(connect_event) => { /* a client connected */ }
+                        SocketEvent::Timeout(timeout_event) => { /* a client timed out */ }
+                        SocketEvent::Disconnect(disconnect_event) => { /* a client disconnected */ }
+                    }
+
+                    
+
                 }
-                Ok(Err(e)) => {
-                    println!("Error waiting for Ctrl+C: {}", e);
-                }
-                Err(_) => {
-                    // Timeout occurred, continue the loop
+                Err(e) => {
+                    println!("Something went wrong when receiving, error: {:?}", e);
                 }
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -188,7 +211,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Shutting down server...");
 
     // Await both handles to ensure clean shutdown
-    let _ = tokio::join!(node_handle, steg_handle,connection_handle);
+    let _ = tokio::join!(node_handle, steg_handle);
 
     Ok(())
 } 
