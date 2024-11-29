@@ -1,0 +1,45 @@
+[package]
+name = "service_provider"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+quinn = "0.11.5" 
+quinn-proto = "0.11.5"
+tokio = { version = "1.28.1", features = ["full"] }
+rustls = { version = "0.23.19", default-features = false, features = ["std", "ring"] }
+rcgen = "0.13"
+anyhow = "1.0.22"
+clap = { version = "4", features = ["derive"] }
+tracing = { version = "0.1.10", default-features = false, features = ["std"] }
+tracing-futures = { version = "0.2.0", default-features = false, features = ["std-future"] }
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+url = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+steganography = "1.0.2"
+image = "0.21.3"
+remote-trait-object = { path = "remote-trait-object" }
+parking_lot = "0.12.3"
+linkme = "0.2.3"
+once_cell = "1.20.2"
+log = "0.4.22"
+hex = "0.4.3"
+env_logger = "0.11.5"
+bincode = "1.3.3"
+remote-trait-object-macro = { path = "remote-trait-object-macro" }
+crossbeam = "0.8.4"
+futures = "0.3.31"
+rand = "0.8.5"
+sysinfo = "0.32.0"
+stegano-core = "0.5.3"
+local-ip-address = "0.6.3"
+google-drive3 = "6.0.0+20240618"
+yup-oauth2 = "11.0.0"
+hyper = { version = "1", features = ["full"] }
+http-body-util = "0.1"
+hyper-rustls = "0.27.3"
+hyper-util = { version = "0.1", features = ["full"] }
+csv = "1.3"
+mime = "0.3"
+lazy_static = "1.4"
