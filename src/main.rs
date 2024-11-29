@@ -32,21 +32,36 @@ pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup DOS Start
-    let ip = "192.168.1.100";
-    match get_dos_entry_by_ip(ip) {
-        Some(entry) => {
-            println!("Found entry for IP: {}", ip);
-            println!("Client ID: {}", entry.Client_ID);
-            println!("Resources: {}", entry.resources);
-        },
-        None => println!("No entry found for IP: {}", ip)
+    let hub = setup_drive_hub().await?;
+    let filename = "DoS.tsv";
+    let drivename = "DoS";
+    //The IP you want to add
+    let client_ip = "192.168.1.100";
+
+    // Get the DOS entry for this IP
+    if let Some(entry) = get_dos_entry_by_ip(client_ip) {
+        // Parameters for add_dos_entry:
+        // hub, client_ip, client_id, resources, drive_id, tsv_filename
+        add_dos_entry(
+            &hub, 
+            &entry.Client_IP,    // IP from the entry
+            &entry.Client_ID,    // Client ID from the entry
+            &entry.resources,    // Resources from the entry
+            drivename,  // Replace with your actual Drive/Folder ID
+            filename    // Your desired filename
+        ).await?;
+    } else {
+        println!("No predefined entry found for IP: {}", client_ip);
     }
+    add_dos_entry(&hub, "192.168.1.2" ,  "new_client2", "d1.jpg", &drivename,&filename).await?;
+    add_dos_entry(&hub, "192.168.1.3" ,  "new_client3", "d1.jpg", &drivename,&filename).await?;
 
-    // let hub = setup_drive_hub().await?;
-    // let filename = "DoS.tsv";
-    // let drivename = "DoS";
+    // delete_dos_entry(&hub, client_ip, &drivename, &filename).await?;
+    // delete_dos_entry(&hub, "192.168.1.3", &drivename, &filename).await?;
 
-    // add_dos_entry(&hub, "192.168.1.1" ,  "new_client1", "d1.jpg", &drivename,&filename).await?;
+    //delete_dos_entry(&hub, "192.168.1.100", &drivename, &filename).await?;
+
+
     // add_dos_entry(&hub, "192.168.1.2" ,  "new_client2", "d1.jpg", &drivename,&filename).await?;
     // add_dos_entry(&hub, "192.168.1.3" ,  "new_client3", "d1.jpg", &drivename,&filename).await?;
     // add_dos_entry(&hub, "192.168.1.4" ,  "new_client4", "d1.jpg", &drivename,&filename).await?;
