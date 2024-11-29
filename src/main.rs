@@ -12,7 +12,7 @@ mod image_steganographer;
 mod quinn_utils;
 mod cloud_leader_election;
 mod dos;
-use dos::{add_dos_entry, delete_dos_entry, setup_drive_hub};
+use dos::{add_dos_entry, delete_dos_entry, setup_drive_hub, get_dos_entry_by_ip};
 use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
 use image;
 use transport::{create, TransportEnds};
@@ -32,19 +32,28 @@ pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup DOS Start
+    let ip = "192.168.1.100";
+    match get_dos_entry_by_ip(ip) {
+        Some(entry) => {
+            println!("Found entry for IP: {}", ip);
+            println!("Client ID: {}", entry.Client_ID);
+            println!("Resources: {}", entry.resources);
+        },
+        None => println!("No entry found for IP: {}", ip)
+    }
 
-    let hub = setup_drive_hub().await?;
-    let filename = "DoS.tsv";
-    let drivename = "DoS";
+    // let hub = setup_drive_hub().await?;
+    // let filename = "DoS.tsv";
+    // let drivename = "DoS";
 
-    add_dos_entry(&hub, "192.168.1.1" ,  "new_client1", "d1.jpg", &drivename,&filename).await?;
-    add_dos_entry(&hub, "192.168.1.2" ,  "new_client2", "d1.jpg", &drivename,&filename).await?;
-    add_dos_entry(&hub, "192.168.1.3" ,  "new_client3", "d1.jpg", &drivename,&filename).await?;
-    add_dos_entry(&hub, "192.168.1.4" ,  "new_client4", "d1.jpg", &drivename,&filename).await?;
+    // add_dos_entry(&hub, "192.168.1.1" ,  "new_client1", "d1.jpg", &drivename,&filename).await?;
+    // add_dos_entry(&hub, "192.168.1.2" ,  "new_client2", "d1.jpg", &drivename,&filename).await?;
+    // add_dos_entry(&hub, "192.168.1.3" ,  "new_client3", "d1.jpg", &drivename,&filename).await?;
+    // add_dos_entry(&hub, "192.168.1.4" ,  "new_client4", "d1.jpg", &drivename,&filename).await?;
 
     
-    delete_dos_entry(&hub, "192.168.1.3", &drivename, &filename).await?;
-    delete_dos_entry(&hub, "192.168.1.4", &drivename, &filename).await?;
+    // delete_dos_entry(&hub, "192.168.1.3", &drivename, &filename).await?;
+    // delete_dos_entry(&hub, "192.168.1.4", &drivename, &filename).await?;
 
 
     /*
