@@ -43,15 +43,15 @@ pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup Quinn endpoints for Node
-    let server_addr_leader_election: SocketAddr = "10.7.19.117:5016".parse()?;
+    let server_addr_leader_election: SocketAddr = "127.0.0.1:12346".parse()?;
     let peer_servers_leader_election: Vec<SocketAddr> = vec![
-        "10.7.16.154:5016".parse()?,
-        "10.7.16.71:5016".parse()?,
+        // "10.7.16.154:5016".parse()?,
+        // "10.7.16.71:5016".parse()?,
     ];
 
     // Setup Quinn endpoints for steganographer
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.19.117:5017".parse()?,
+        "127.0.0.1:12346".parse()?,
     ];
 
     println!("Quin node is beginning setup");
@@ -68,12 +68,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     
-    let mut server_endpoints = Vec::new();
-    for addr in server_addrs.clone() {
-        let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
-        server_endpoints.push(endpoint);
-    }
-    println!("Steganography service endpoints are setup");
+    // let mut server_endpoints = Vec::new();
+    // for addr in server_addrs.clone() {
+    //     let (endpoint, _cert) = make_server_endpoint(addr).unwrap();
+    //     server_endpoints.push(endpoint);
+    // }
+    // println!("Steganography service endpoints are setup");
 
 
 

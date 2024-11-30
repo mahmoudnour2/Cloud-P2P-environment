@@ -43,11 +43,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.19.117:5017".parse()?,
-        "10.7.16.154:5017".parse()?,
-        "10.7.16.71:5017".parse()?,
+        "127.0.0.1:12346".parse()?,
     ];  // Connect to server's ports
-    let client_addr: SocketAddr = "10.7.17.170:0".parse()?;  // Listen on this port
+    let client_addr: SocketAddr = "127.0.0.1:0".parse()?;  // Listen on this port
 
 
 
@@ -122,20 +120,89 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let stego_path = stego_path.clone();
                     let finale_path = finale_path.clone();
                     let secret_file_name = secret_file_name.clone();
+                    let addr = addr.clone();
 
-                    // Creates the socket
-                    let mut socket = Socket::bind("127.0.0.1:12345")?;
-                    let packet_sender = socket.get_packet_sender();
-                    // Starts the socket, which will start a poll mechanism to receive and send messages.
-                    let _thread = thread::spawn(move || socket.start_polling());
+                    
+                    
 
-                    // Bytes to sent
-                    let bytes = 
+
             
                     let handle = tokio::spawn(async move {
                         
                         
-                        
+                        // Creates the socket
+                        let mut socket = match Socket::bind(client_addr.clone()) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                println!("Failed to bind socket: {}", e);
+                                return;
+                            }
+                        };
+                        let event_receiver = socket.get_event_receiver();
+                        let packet_sender = socket.get_packet_sender();
+                        // Starts the socket, which will start a poll mechanism to receive and send messages.
+                        let _thread = thread::spawn(move || socket.start_polling());
+                        let bytes = vec![];
+                        let reliable_ordered = Packet::reliable_ordered(addr, bytes, None);
+
+                        packet_sender.send(reliable_ordered).unwrap();
+
+                        // Waits until a socket event occurs
+                        let result = event_receiver.recv();
+
+                        match result {
+                            Ok(socket_event) => {
+                                match socket_event {
+                                    SocketEvent::Packet(packet) => {
+                                        let endpoint: SocketAddr = packet.addr();
+                                        let received_data: &[u8] = packet.payload();
+
+                                        let new_addr: SocketAddr = String::from_utf8_lossy(received_data).parse().unwrap();
+                                        println!("Received new address: {}", new_addr);
+
+                                        let steg_info = StegoRequest {
+                                            secret_image: secret_image_bytes.clone(),
+                                            output_path: stego_path.clone(),
+                                            file_name: secret_file_name.clone(),
+                                        };
+
+                                        let steg_info_bytes = bincode::serialize(&steg_info).unwrap();
+
+                                        let reliable_ordered = Packet::reliable_ordered(new_addr, steg_info_bytes, None);
+
+                                        packet_sender.send(reliable_ordered).unwrap();
+
+                                        let result = event_receiver.recv();
+
+                                        match result {
+                                            Ok(socket_event) => {
+                                                match socket_event {
+                                                    SocketEvent::Packet(packet) => {
+                                                        let endpoint: SocketAddr = packet.addr();
+                                                        let received_data: &[u8] = packet.payload();
+
+                                                        let stegano_bytes: Vec<u8> = bincode::deserialize(received_data).unwrap();
+                                                        let local_steganogragrapher = SomeImageSteganographer::new(100, 10);
+                                                        let _finale = local_steganogragrapher.decode(&stegano_bytes, &finale_path, &secret_file_name).unwrap();
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            Err(e) => {
+                                                println!("Something went wrong when receiving, error: {:?}", e);
+                                            }
+                                        }
+                                    }
+                                    SocketEvent::Connect(connect_event) => { /* a client connected */ }
+                                    SocketEvent::Timeout(timeout_event) => { /* a client timed out */ }
+                                    SocketEvent::Disconnect(disconnect_event) => { /* a client disconnected */ }
+                                }
+                            }
+                            Err(e) => {
+                                println!("Something went wrong when receiving, error: {:?}", e);
+                            }
+                        }
+
                         
 
 
