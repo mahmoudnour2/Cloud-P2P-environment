@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::fs::File;
+use image::FilterType::Lanczos3;
 use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, Rgb, Rgba};
 use stegano_core::commands::unveil;
 use steganography::util::{file_as_dynamic_image, save_image_buffer};
@@ -21,18 +22,20 @@ use std::error::Error;
 use stegano_core::{SteganoCore,SteganoEncoder, CodecOptions};
 use std::io::Cursor;
 use minifb::{Window, WindowOptions, Key};
+use tempfile::NamedTempFile;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AccessMetadata {
     owner_id: String,
     requester_id: String,
     access_rights: u32,
+    file_name: String,
 }
 
 #[remote_trait_object_macro::service]
 pub trait ImageSteganographer: Send + Sync {
-    fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str) -> Result<Vec<u8>, String>;
-    fn decode(&self, encoded_image: &[u8], decoded_image_path: &str, file_name: &str) -> Result<Vec<u8>, String>;
+    fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str, owner_id: &str) -> Result<Vec<u8>, String>;
+    //fn decode(&self, encoded_image: &[u8], decoded_image_path: &str, file_name: &str) -> Result<Vec<u8>, String>;
     
     fn encode_with_access_rights(&self, 
         secret_image: &[u8], 
@@ -44,12 +47,14 @@ pub trait ImageSteganographer: Send + Sync {
     
     fn decode_with_access_check(&self, 
         encoded_image: &[u8],
-        requester_id: &str
+        requester_id: &str,
+        output_path: &str
     ) -> Result<Vec<u8>, String>;
     
     fn view_decoded_image_temp(&self, 
         encoded_image: &[u8],
-        requester_id: &str
+        requester_id: &str,
+        output_path: &str
     ) -> Result<(), String>;
 }
 impl Service for dyn ImageSteganographer {}
@@ -73,11 +78,12 @@ impl SomeImageSteganographer {
 impl ImageSteganographer for SomeImageSteganographer {
 
 
-    fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str) -> Result<Vec<u8>, String> {
+    fn encode(&self, secret_image: &[u8], output_path: &str, file_name: &str, owner_id: &str) -> Result<Vec<u8>, String> {
         
         println!("Beginning Encoding");
         
-        // Save the secret image to a temporary file
+
+
         let temp_secret_path = format!("/tmp/{}",file_name);
         let mut temp_secret_file = File::create(&temp_secret_path).map_err(|e| e.to_string())?;
         temp_secret_file.write_all(secret_image).map_err(|e| e.to_string())?;
@@ -110,36 +116,52 @@ impl ImageSteganographer for SomeImageSteganographer {
         Ok(buffer)
     }
 
+    // fn decode(&self, encoded_image: &[u8], decoded_file_path: &str, _file_name: &str) -> Result<Vec<u8>, String> {
+    //     let encoded_image = image::load_from_memory(encoded_image).map_err(|e| format!("Failed to load image from memory: {}", e))?;
+        
+    //     // Ensure the directory for the temporary file exists
+    //     let temp_enc_path = "tmp/encoded_image.png";
+    //     if let Some(parent) = Path::new(temp_enc_path).parent() {
+    //         std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    //     }
+    //     encoded_image.save(temp_enc_path).map_err(|e| format!("Failed to save encoded image: {}", e))?;
 
-    fn decode(&self, encoded_image: &[u8], decoded_image_path: &str, file_name: &str) -> Result<Vec<u8>, String> {
-        
-        let encoded_image = image::load_from_memory(encoded_image).unwrap();
-        // let encoded_bytes = encoded_image.to_rgba();
-        // let decoder = Decoder::new(encoded_bytes);
-        // let decoded_bytes = decoder.decode_alpha();
-        // let decoded_bytes: &[u8]= &decoded_bytes;
-        
-        // let decoded_image = image::load_from_memory(decoded_bytes).unwrap();
-        // decoded_image.save(decoded_image_path).map_err(|e| e.to_string())?;
+    //     let mut trimmed_decoded_file_path = decoded_file_path.trim_end_matches(".png");
+    //     trimmed_decoded_file_path = trimmed_decoded_file_path.trim_end_matches(".jpg");
+    //     let formatted_decoded_file_path = format!("{}.txt", trimmed_decoded_file_path);
+    //     println!("Formatted decoded file path: {}", formatted_decoded_file_path);
 
-        // Save the encoded image to a temporary file
-        let temp_enc_path = "/tmp/encoded_image.png";
-        encoded_image.save(temp_enc_path).unwrap();
-        let _result = unveil(
-            &Path::new(temp_enc_path),
-            &Path::new(decoded_image_path),
-            &CodecOptions::default());
+    //     // Create a temporary file for the decoded text
+    //     let mut temp_decoded_file = NamedTempFile::new().map_err(|e| format!("Failed to create temporary file: {}", e))?;
 
-        println!("Decoded image saved to {}", decoded_image_path);
-        
-        let new_decoded_image_path = decoded_image_path.to_owned()+"/"+file_name;
-        let decoded_image = image::open(new_decoded_image_path).unwrap();
-        
-        let mut buffer = Vec::new();
-        decoded_image.write_to(&mut buffer, ImageFormat::PNG).map_err(|e| e.to_string())?;
-        std::fs::remove_file(&temp_enc_path).map_err(|e| e.to_string())?;
-        Ok(buffer)
-    }
+    //     // Extract metadata
+    //     println!("Extracting metadata from the encoded image.");
+    //     let result = unveil(
+    //         &Path::new(&temp_enc_path),
+    //         temp_decoded_file.path(),
+    //         &CodecOptions::default(),
+    //     ).map_err(|e| format!("Failed to extract metadata: {}", e));
+    //     println!("Metadata extraction result: {:?}", result);
+
+    //     if let Err(e) = result {
+    //         return Err(format!("Failed to extract metadata: {}", e));
+    //     }
+
+    //     // Read and parse metadata
+    //     let mut metadata_str = String::new();
+    //     temp_decoded_file.read_to_string(&mut metadata_str).map_err(|e| format!("Failed to read metadata: {}", e))?;
+    //     let metadata: AccessMetadata = serde_json::from_str(&metadata_str).map_err(|e| format!("Failed to parse metadata: {}", e))?;
+
+    //     // Write the metadata to the final file
+    //     let mut final_file = File::create(&formatted_decoded_file_path).map_err(|e| format!("Failed to create decoded file: {}", e))?;
+    //     final_file.write_all(metadata_str.as_bytes()).map_err(|e| format!("Failed to write to decoded file: {}", e))?;
+
+    //     // Read the decoded text file into memory
+    //     let mut buffer = Vec::new();
+    //     final_file.read_to_end(&mut buffer).map_err(|e| format!("Failed to read decoded text file: {}", e))?;
+
+    //     Ok(buffer)
+    // }
 
     fn encode_with_access_rights(&self,
         encoded_image: &[u8],
@@ -148,6 +170,15 @@ impl ImageSteganographer for SomeImageSteganographer {
         access_rights: u32,
         output_path: &str
     ) -> Result<Vec<u8>, String> {
+        // Remove the file extension from the output path
+        let carrier_path = "carrier.png";
+        let mut trimmed_output_path = output_path.trim_end_matches(".png");
+        let file_name = output_path;
+        trimmed_output_path = trimmed_output_path.trim_end_matches(".jpg");
+
+        // Ensure the output path has a .png extension
+        let output_path_with_extension = format!("{}.png", trimmed_output_path);
+
         // Create necessary directories
         std::fs::create_dir_all("/tmp/stegano_temp")
             .map_err(|e| format!("Failed to create temp directory: {}", e))?;
@@ -156,13 +187,15 @@ impl ImageSteganographer for SomeImageSteganographer {
         let metadata = AccessMetadata {
             owner_id: owner_id.to_string(),
             requester_id: requester_id.to_string(),
-            access_rights: access_rights,
+            access_rights,
+            file_name: file_name.to_string(),
         };
         
         // Use the new directory for temporary files
         let temp_metadata_path = format!("/tmp/stegano_temp/metadata_{}.txt", requester_id);
-        let temp_encoded_path = format!("/tmp/stegano_temp/encoded_{}.png", requester_id);
-        let final_encoded_path = format!("/tmp/stegano_temp/final_{}.png", requester_id);
+        let temp_metadata_path = temp_metadata_path.as_str();
+        let temp_secret_path = format!("/tmp/stegano_temp/secret_{}.png", requester_id);
+        let temp_secret_path = temp_secret_path.as_str();
 
         // Serialize metadata to JSON
         let metadata_json = serde_json::to_string(&metadata)
@@ -171,59 +204,73 @@ impl ImageSteganographer for SomeImageSteganographer {
         std::fs::write(&temp_metadata_path, metadata_json)
             .map_err(|e| format!("Failed to write metadata: {}", e))?;
 
-        std::fs::write(&temp_encoded_path, encoded_image)
-            .map_err(|e| format!("Failed to write encoded image: {}", e))?;
-
+        // Save the secret image temporarily
+        std::fs::write(&temp_secret_path, encoded_image)
+            .map_err(|e| format!("Failed to write secret image: {}", e))?;
+        
+        let files_vec: Vec<&str> = vec![&temp_metadata_path, &temp_secret_path];
+        // Hide both metadata and secret image
         SteganoCore::encoder()
-            .hide_file(&temp_metadata_path)
-            .use_media(&temp_encoded_path).unwrap()
-            .write_to(output_path)
+            .hide_files(files_vec)
+            .use_media(&carrier_path).unwrap()
+            .write_to(&output_path_with_extension)
             .hide();
 
-        // Read the final encoded image
-        let final_image = image::open(output_path)
-            .map_err(|e| format!("Failed to open final encoded image: {}", e))?;
+        // Read the encoded image into memory
+        let encoded_image = image::open(&output_path_with_extension)
+            .map_err(|e| format!("Failed to open encoded image: {}", e))?;
         let mut buffer = Vec::new();
-        final_image.write_to(&mut buffer, ImageFormat::PNG)
+        encoded_image.write_to(&mut buffer, ImageFormat::PNG)
             .map_err(|e| format!("Failed to write to buffer: {}", e))?;
 
         // Cleanup temporary files
         std::fs::remove_file(&temp_metadata_path).ok();
-        std::fs::remove_file(&temp_encoded_path).ok();
+        std::fs::remove_file(&temp_secret_path).ok();
 
         Ok(buffer)
     }
 
     fn decode_with_access_check(&self,
         encoded_image: &[u8],
-        requester_id: &str
+        requester_id: &str,
+        output_path: &str
     ) -> Result<Vec<u8>, String> {
+        let carrier_path = "carrier.png";
+        // Remove the file extension from the output path
+        let mut trimmed_output_path = output_path.trim_end_matches(".png");
+        trimmed_output_path = trimmed_output_path.trim_end_matches(".jpg");
+
+        // Ensure the output path has a .png extension
+        let output_path_with_extension = format!("{}.png", trimmed_output_path);
         // Create necessary directories
-        std::fs::create_dir_all("/tmp/stegano_temp")
-            .map_err(|e| format!("Failed to create temp directory: {}", e))?;
-
+        let temp_dir = format!("/tmp/stegano_temp_{}", requester_id);
+        std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
+       
         // Use the new directory for temporary files
-        let temp_encoded_path = format!("/tmp/stegano_temp/temp_encoded_{}.png", requester_id);
-        let temp_metadata_path = format!("/tmp/stegano_temp/extracted_metadata_{}.txt", requester_id);
-        let temp_output_path = format!("/tmp/stegano_temp/decoded_{}.png", requester_id);
-        let final_encoded_path = format!("/tmp/stegano_temp/final_encoded_{}.png", requester_id);
-
+        let temp_encoded_path = format!("{}/temp_encoded.png", temp_dir);
+        let temp_metadata_path = format!("{}/metadata_{}.txt", temp_dir, requester_id);
+        let temp_secret_path = format!("{}/secret_{}.png", temp_dir, requester_id);
+       
         // Save the encoded image temporarily
-        std::fs::write(&temp_encoded_path, encoded_image)
-            .map_err(|e| format!("Failed to write temp encoded image: {}", e))?;
-
-        // Extract metadata
-        let _result = unveil(
+        std::fs::write(&temp_encoded_path, encoded_image).map_err(|e| format!("Failed to write temp encoded image: {}", e))?;
+       
+        // Extract metadata and secret image
+        println!("Extracting metadata and secret image from the encoded image.");
+        let result = unveil(
             &Path::new(&temp_encoded_path),
-            &Path::new(&temp_metadata_path),
-            &CodecOptions::default());
-
+            &Path::new(&temp_dir),
+            &CodecOptions::default()
+        ).map_err(|e| format!("Failed to extract metadata and secret image: {}", e));
+        println!("Metadata and secret image extraction result: {:?}", result);
+       
+        if let Err(e) = result {
+            return Err(format!("Failed to extract metadata and secret image: {}", e));
+        }
+       
         // Read and parse metadata
-        let metadata_str = std::fs::read_to_string(&temp_metadata_path)
-            .map_err(|e| format!("Failed to read metadata: {}", e))?;
-        let mut metadata: AccessMetadata = serde_json::from_str(&metadata_str)
-            .map_err(|e| format!("Failed to parse metadata: {}", e))?;
-
+        let metadata_str = std::fs::read_to_string(&temp_metadata_path).map_err(|e| format!("Failed to read metadata: {}", e))?;
+        let mut metadata: AccessMetadata = serde_json::from_str(&metadata_str).map_err(|e| format!("Failed to parse metadata: {}", e))?;
+       
         // Check access rights
         if metadata.requester_id != requester_id {
             return Err("Unauthorized access: requester ID mismatch".to_string());
@@ -231,29 +278,47 @@ impl ImageSteganographer for SomeImageSteganographer {
         if metadata.access_rights == 0 {
             return Err("No more access rights remaining".to_string());
         }
-
+        
+        
         // Decode the actual image
-        let _result = unveil(
-            &Path::new(&temp_encoded_path),
-            &Path::new(&temp_output_path),
-            &CodecOptions::default());
-
+        let temp_decoded_dir = format!("{}/temp_decoded", temp_dir);
+        std::fs::create_dir_all(&temp_decoded_dir).map_err(|e| format!("Failed to create temporary decoded directory: {}", e))?;
+        let result = unveil(
+            &Path::new(&temp_secret_path),
+            &Path::new(&temp_decoded_dir),
+            &CodecOptions::default()
+        ).map_err(|e| format!("Failed to extract secret image: {}", e));
+        println!("Secret image extraction result: {:?}", result);
+        
+        if let Err(e) = result {
+            return Err(format!("Failed to extract secret image: {}", e));
+        }
+       
         // Decrement access rights and save updated metadata
         metadata.access_rights -= 1;
-        let updated_metadata = serde_json::to_string(&metadata)
-            .map_err(|e| format!("Failed to serialize updated metadata: {}", e))?;
-        std::fs::write(&temp_metadata_path, updated_metadata)
-            .map_err(|e| format!("Failed to write updated metadata: {}", e))?;
+        let updated_metadata = serde_json::to_string(&metadata).map_err(|e| format!("Failed to serialize updated metadata: {}", e))?;
+        std::fs::write(&temp_metadata_path, updated_metadata).map_err(|e| format!("Failed to write updated metadata: {}", e))?;
+        
+        let files_vec: Vec<&str> = vec![&temp_metadata_path, &temp_secret_path].iter().map(|s| s.as_str()).collect();
 
-        // Re-encode with updated metadata
         SteganoCore::encoder()
-            .hide_file(&temp_metadata_path)
-            .use_media(&temp_output_path).unwrap()
-            .write_to(&final_encoded_path)
+            .hide_files(files_vec)
+            .use_media(&carrier_path).unwrap()
+            .write_to(&output_path_with_extension)
             .hide();
 
         // Read the decoded image into memory
-        let decoded_image = image::open(&temp_output_path)
+
+        let mut temp_decoded_path = format!("{}/{}_{}", temp_decoded_dir,metadata.owner_id,metadata.file_name);
+        // Remove the file extension from the output path
+        temp_decoded_path = temp_decoded_path.trim_end_matches(".png").to_string();
+        temp_decoded_path = temp_decoded_path.trim_end_matches(".jpg").to_string();
+
+        // Ensure the output path has a .png extension
+        temp_decoded_path = format!("{}.jpg", temp_decoded_path);
+
+        println!("Opening decoded image: {}", temp_decoded_path);
+        let decoded_image = image::open(&temp_decoded_path)
             .map_err(|e| format!("Failed to open decoded image: {}", e))?;
         let mut buffer = Vec::new();
         decoded_image.write_to(&mut buffer, ImageFormat::PNG)
@@ -262,18 +327,19 @@ impl ImageSteganographer for SomeImageSteganographer {
         // Cleanup temporary files
         std::fs::remove_file(&temp_encoded_path).ok();
         std::fs::remove_file(&temp_metadata_path).ok();
-        std::fs::remove_file(&temp_output_path).ok();
-        std::fs::remove_file(&final_encoded_path).ok();
+        std::fs::remove_file(&temp_secret_path).ok();
+        std::fs::remove_file(&temp_decoded_path).ok();
 
         Ok(buffer)
     }
 
     fn view_decoded_image_temp(&self, 
         encoded_image: &[u8],
-        requester_id: &str
+        requester_id: &str,
+        output_path: &str
     ) -> Result<(), String> {
         // First decode the image and check access rights
-        let decoded_buffer = self.decode_with_access_check(encoded_image, requester_id)?;
+        let decoded_buffer = self.decode_with_access_check(encoded_image, requester_id,output_path)?;
         
         // Load the image from memory
         let img = image::load_from_memory(&decoded_buffer)
@@ -315,47 +381,4 @@ impl ImageSteganographer for SomeImageSteganographer {
 
         Ok(())
     }
-}
-
-fn encode_and_unveil(encoded_image: &[u8], metadata_json: &str, requester_id: &str) -> Result<(), String> {
-    // Create a temporary file for the metadata
-    let temp_metadata_path = format!("/tmp/metadata_{}.txt", requester_id);
-    println!("Creating metadata file at: {}", temp_metadata_path);
-    std::fs::write(&temp_metadata_path, metadata_json)
-        .map_err(|e| format!("Failed to write metadata: {}", e))?;
-    println!("Metadata file created successfully.");
-
-    // Save the already encoded image to a temporary file
-    let temp_encoded_path = format!("/tmp/encoded_{}.png", requester_id);
-    println!("Creating encoded image file at: {}", temp_encoded_path);
-    std::fs::write(&temp_encoded_path, encoded_image)
-        .map_err(|e| format!("Failed to write encoded image: {}", e))?;
-    println!("Encoded image file created successfully.");
-
-    // Encode the metadata into the already encoded image
-    let final_encoded_path = format!("/tmp/final_encoded_{}.png", requester_id);
-    println!("Encoding metadata into the encoded image.");
-    SteganoCore::encoder()
-        .hide_file(&temp_metadata_path)
-        .use_media(&temp_encoded_path).unwrap()
-        .write_to(&final_encoded_path)
-        .hide();
-    println!("Metadata encoded successfully into the image.");
-
-    // Verify that the files exist before unveiling
-    if !Path::new(&final_encoded_path).exists() {
-        return Err(format!("Final encoded image does not exist: {}", final_encoded_path));
-    }
-    if !Path::new(&temp_metadata_path).exists() {
-        return Err(format!("Metadata file does not exist: {}", temp_metadata_path));
-    }
-
-    // Unveil the metadata from the encoded image
-    let _result = unveil(
-        &Path::new(&final_encoded_path),
-        &Path::new(&temp_metadata_path),
-        &CodecOptions::default());
-    println!("Metadata extraction result: {:?}", _result);
-
-    Ok(())
 }

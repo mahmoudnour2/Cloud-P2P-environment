@@ -35,7 +35,7 @@ std::fs::create_dir_all("decoded_images")
 .map_err(|e| format!("Failed to create decoded_images directory: {}", e))?;
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.19.102:5017".parse()?,
+        "10.7.17.170:5017".parse()?,
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "10.7.19.179:0".parse()?;  // Listen on this port
 
@@ -111,8 +111,8 @@ std::fs::create_dir_all("decoded_images")
             let secret_image_bytes = &secret_image;
         
             // Generate unique output paths for each image
-            let stego_path = format!("stego_{}.png", secret_file_name);
-            let stego_with_rights_path = format!("stego_with_access_rights_{}.png", secret_file_name);
+            let stego_path = format!("{}.png", secret_file_name);
+            let stego_with_rights_path = format!("{}.png", secret_file_name);
             let finale_path = format!("decoded_images");
         
             println!("Encoding secret image {}...", index);
@@ -126,7 +126,6 @@ std::fs::create_dir_all("decoded_images")
                 let mut handles = vec![];
         
                 for addr in server_addrs.clone() {
-                    
                     
                     let client_endpoint = client_endpoint.clone();
                     let secret_image_bytes = secret_image_bytes.clone();
@@ -169,7 +168,8 @@ std::fs::create_dir_all("decoded_images")
                                 let encoded_image = image_steganographer_proxy.encode(
                                     &secret_image_bytes,
                                     &stego_path,
-                                    &secret_file_name
+                                    &secret_file_name,
+                                    &owner_id,
                                 )?;
 
                                 // Then add access rights locally
@@ -200,17 +200,20 @@ std::fs::create_dir_all("decoded_images")
                         match stegano {
                             Ok(final_encoded) => {
                                 println!("Encoding completed successfully");
-                                // View the image temporarily
+                                let stego_with_rights_path = stego_with_rights_path.clone();
                                 let local_steganographer = SomeImageSteganographer::new(100, 10);
+
                                 if let Err(e) = local_steganographer.view_decoded_image_temp(
                                     &final_encoded,
-                                    "requester456"
+                                    "requester456",
+                                    &stego_with_rights_path
+                                    
                                 ) {
-                                    println!("Error viewing image: {}", e);
+                                    println!("Error viewing decoded image: {}", e);
                                 }
                             },
-                            Err(e) => {
-                                retries += 1;
+                        Err(e) => {
+                            retries += 1;
                                 backoff_duration *= 2;
                                 println!("Failed to encode: {:?}", e);
                             }
