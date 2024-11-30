@@ -47,40 +47,6 @@ pub mod keepalive {
     tonic::include_proto!("proto/keep_alive"); // This should match your proto path
 }
 
-async fn send_keep_alive(server_addr: String) {
-    let mut interval = interval(Duration::from_secs(10)); // Send every 10 seconds
-    let uri = format!("http://{}", server_addr);
-
-    let mut client = match KeepAliveClient::connect(uri).await {
-        Ok(client) => client,
-        Err(e) => {
-            println!("Failed to connect to server {}: {}", server_addr, e);
-            return;
-        }
-    };
-    loop {
-        interval.tick().await;
-
-        let ping = Ping {
-            message: "ping".to_string(),  // Customize the message if needed
-        };
-        // Send keep-alive message
-        let mut stream = match client.keep_alive(Request::new(tokio_stream::iter(vec![ping]))).await {
-            Ok(response) => response.into_inner(),
-            Err(e) => {
-                println!("Failed to send keep-alive to server {}: {}", server_addr, e);
-                return;
-            }
-        };
-
-        // Handle Pong responses
-        while let Some(pong) = stream.message().await.unwrap() {
-            println!("Received Pong from {}: {}", server_addr, pong.message);
-        }
-
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
@@ -89,13 +55,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let server_addrs: Vec<&str> = vec![
         "[::1]:50051",
     ];  // Connect to server's ports
+    let mut transport_config = TransportConfig::default();
+    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(10)));
+    client_config.transport_config(Arc::new(transport_config));
+    let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
+    client_endpoint.set_default_client_config(client_config);
+    let directory_of_service_adds: Vec<&str> = vec![
+        "[::1]:50052",
+    ];
 
-    for server_addr in &server_addrs {
-        let server_addr = server_addr.to_string();
-        tokio::spawn(async move {
-            send_keep_alive(server_addr).await;
-        });
-    }
+    tokio::spawn(async move {
+        loop{
+            for server_addr in &directory_of_service_adds {
+                let server_addr: SocketAddr = server_addr.parse()?;
+                let connecting: Connecting = client_endpoint.connect(server_addr, "localhost")?;
+                let connection = connecting.await?;
+                println!("Connected to directory service at {}", server_addr);
+            }
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    });
+    
     // Load all secret images from the secret_images folder
     let secret_images_path = "secret_images";
     let secret_images = std::fs::read_dir(secret_images_path).map_err(|e| e.to_string())?

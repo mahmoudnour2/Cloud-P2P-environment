@@ -48,70 +48,67 @@ pub mod keepalive {
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Default)]
-pub struct KeepAliveService {}
-
-
-#[tonic::async_trait]
-impl keep_alive::KeepAliveService for KeepAliveService {
-    type KeepAliveStream = tokio::sync::mpsc::Receiver<keep_alive::Pong>;
-
-    async fn keep_alive(
-        &self,
-        request: tonic::Request<tonic::Streaming<keep_alive::Ping>>,
-    ) -> Result<tonic::Response<Self::KeepAliveStream>, tonic::Status> {
-        println!("Started keep-alive stream");
-
-        let mut stream = request.into_inner();
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<keep_alive::Pong>(100);
-
-        // Spawn a task to handle incoming pings and send pongs
-        tokio::spawn(async move {
-            loop {
-                match stream.message().await {
-                    Ok(Some(ping)) => {
-                        println!("Received ping: {}", ping.message);
-                        // Respond with a pong
-                        if let Err(_) = tx.send(keep_alive::Pong {
-                            message: "pong".to_string(),
-                        }).await {
-                            println!("Failed to send pong, client might have disconnected.");
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        // The client has closed the stream (disconnected)
-                        println!("Client disconnected");
-                        break;
-                    }
-                    Err(_) => {
-                        println!("Error receiving message from client");
-                        break;
-                    }
-                }
-
-                // Simulate a heartbeat check from the server
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            }
-        });
-
-        Ok(tonic::Response::new(rx))
-    }
-}
-
 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Setup Quinn endpoints for Node
     let server_addr_leader_election: SocketAddr = "0.0.0.0:0".parse()?;
+    let directory_of_service_addr: SocketAddr = "10.7.16.154:5020",parse()?;
     let peer_servers_leader_election: Vec<SocketAddr> = vec![
         // "10.7.16.154:5016".parse()?,
         // "10.7.16.71:5016".parse()?,
     ];
+    
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let cert_der = CertificateDer::from(cert.cert);
+    let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
 
+    let mut directory_of_service_server_config =
+        ServerConfig::with_single_cert(vec![cert_der.clone()], priv_key.into())?;
+    let directory_of_service_server_transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
+    directory_of_service_server_transport_config.max_concurrent_uni_streams(0_u8.into());
+    // directory_of_service_server_transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
+    // directory_of_service_server_transport_config.max_idle_timeout(Some(std::time::Duration::from_secs(10).try_into().unwrap()));
+    let directory_of_service_addr_endpoint = Endpoint::server(directory_of_service_server_config, directory_of_service_addr)?;
 
-
+    // Spawn a new task to listen for connection requests on the directory of service endpoint
+    let connections = Arc::new(Mutex::new(Vec::new()));
+    let connections_clone = Arc::clone(&connections);
+    tokio::spawn(async move {
+        let mut incoming = directory_of_service_addr_endpoint.incoming();
+        while let Some(conn) = incoming.next().await {
+            if CURRENT_LEADER_ID.load(AtomicOrdering::Relaxed) != PERSONAL_ID.load(AtomicOrdering::Relaxed) {
+                // Ignore connections if not the leader
+                continue;
+            }
+            match conn {
+                Ok(new_conn) => {
+                    println!("New connection established: {:?}", new_conn.remote_address());
+                    // Handle the new connection here
+                }
+                Err(e) => {
+                    eprintln!("Failed to establish connection: {:?}", e);
+                }
+            }
+        }
+    });
+    // Monitor connections for failures
+    tokio::spawn(async move {
+        loop {
+            let mut connections = connections_clone.lock().await;
+            connections.retain(|conn| {
+                if conn.is_closed() {
+                    println!("Connection closed: {:?}", conn.remote_address());
+                    // Handle the closed connection here
+                    false
+                } else {
+                    true
+                }
+            });
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
+    });
     println!("Quin node is beginning setup");
     let my_id = 2; // Make sure this matches your node ID
     PERSONAL_ID.store(my_id as u64, AtomicOrdering::Relaxed);
