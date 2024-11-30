@@ -11,6 +11,7 @@ use tokio::sync::{Mutex};
 use std::collections::{HashMap, VecDeque};
 mod cloud_leader_election;
 use cloud_leader_election::{State, VoteReason, SystemMetrics, Node};
+use steganography::*;
 
 use image_steganographer::encoder_server::{Encoder, EncoderServer};
 use image_steganographer::{EncodeRequest, EncodeReply};
@@ -153,8 +154,14 @@ impl Encoder for ImageSteganographyService {
         let output_path = encode_request.output_path;
         let file_name = encode_request.file_name;
 
+        // Strip the file extension from file_name
+        let file_name = match std::path::Path::new(&file_name).file_stem() {
+            Some(stem) => stem.to_string_lossy().into_owned(),
+            _none => return Err(Status::internal("Failed to strip file extension")),
+        };
 
-        if (CURRENT_LEADER_ID.load(AtomicOrdering::Relaxed) != PERSONAL_ID.load(AtomicOrdering::Relaxed)) {
+
+        if CURRENT_LEADER_ID.load(AtomicOrdering::Relaxed) != PERSONAL_ID.load(AtomicOrdering::Relaxed) {
             return Err(Status::internal("Not the leader"));
         }
 
@@ -195,13 +202,15 @@ impl Encoder for ImageSteganographyService {
 
         println!("Encoded image saved to {}", output_path);
 
-        let encoded_image = match image::open(output_path) {
-            Ok(img) => img,
-            Err(e) => return Err(Status::internal(format!("Failed to open encoded image: {}", e))),
+        let mut encoded_image_file = match File::open(&output_path) {
+            Ok(file) => file,
+            Err(e) => return Err(Status::internal(format!("Failed to open encoded image file: {}", e))),
         };
 
+        let encoded_image_bytes = steganography::util::file_to_bytes(encoded_image_file);
+
         let mut buffer = Vec::new();
-        if let Err(e) = encoded_image.write_to(&mut buffer, ImageFormat::PNG) {
+        if let Err(e) = buffer.write_all(&encoded_image_bytes) {
             return Err(Status::internal(format!("Failed to write encoded image to buffer: {}", e)));
         }
 

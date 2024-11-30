@@ -96,7 +96,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let secret_image_bytes = &secret_image;
             
                 // Generate unique output paths for each image
-                let stego_path = format!("encoded_images/stego_{}.png", secret_file_name);
+                let secret_file_stem = secret_path.file_stem()
+                    .ok_or("Failed to get file stem")?
+                    .to_str()
+                    .ok_or("Failed to convert file stem to string")?
+                    .to_string();
+                let stego_path = format!("encoded_images/stego_{}.png", secret_file_stem);
                 let finale_path = format!("decoded_images");
                 let mut handles = vec![];
 
