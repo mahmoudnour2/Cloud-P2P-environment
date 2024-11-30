@@ -27,17 +27,58 @@ use port_grabber::port_grabber_client::PortGrabberClient;
 use port_grabber::PortRequest;
 use port_grabber::PortReply;
 
+use keepalive::keep_alive_client::KeepAliveClient;
+use keepalive::Ping;
+use keepalive::Pong;
+
 use image_steganographer::encoder_client::EncoderClient;
 use image_steganographer::EncodeRequest;
 use image_steganographer::EncodeReply;
 
 
 pub mod port_grabber {
-    tonic::include_proto!("port_grabber");
+    tonic::include_proto!("proto/port_grabber");
 }
 
 pub mod image_steganographer {
-    tonic::include_proto!("steganography");
+    tonic::include_proto!("proto/steganography");
+}
+pub mod keepalive {
+    tonic::include_proto!("proto/keep_alive"); // This should match your proto path
+}
+
+async fn send_keep_alive(server_addr: String) {
+    let mut interval = interval(Duration::from_secs(10)); // Send every 10 seconds
+    let uri = format!("http://{}", server_addr);
+
+    let mut client = match KeepAliveClient::connect(uri).await {
+        Ok(client) => client,
+        Err(e) => {
+            println!("Failed to connect to server {}: {}", server_addr, e);
+            return;
+        }
+    };
+    loop {
+        interval.tick().await;
+
+        let ping = Ping {
+            message: "ping".to_string(),  // Customize the message if needed
+        };
+        // Send keep-alive message
+        let mut stream = match client.keep_alive(Request::new(tokio_stream::iter(vec![ping]))).await {
+            Ok(response) => response.into_inner(),
+            Err(e) => {
+                println!("Failed to send keep-alive to server {}: {}", server_addr, e);
+                return;
+            }
+        };
+
+        // Handle Pong responses
+        while let Some(pong) = stream.message().await.unwrap() {
+            println!("Received Pong from {}: {}", server_addr, pong.message);
+        }
+
+    }
 }
 
 #[tokio::main]
@@ -49,7 +90,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "[::1]:50051",
     ];  // Connect to server's ports
 
-
+    for server_addr in &server_addrs {
+        let server_addr = server_addr.to_string();
+        tokio::spawn(async move {
+            send_keep_alive(server_addr).await;
+        });
+    }
     // Load all secret images from the secret_images folder
     let secret_images_path = "secret_images";
     let secret_images = std::fs::read_dir(secret_images_path).map_err(|e| e.to_string())?

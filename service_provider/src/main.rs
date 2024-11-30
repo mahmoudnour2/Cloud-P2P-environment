@@ -33,6 +33,7 @@ use local_ip_address::local_ip;
 use std::net::IpAddr;
 use std::net::UdpSocket;
 
+
 pub mod port_grabber {
     tonic::include_proto!("port_grabber");
 }
@@ -40,11 +41,63 @@ pub mod port_grabber {
 pub mod image_steganographer {
     tonic::include_proto!("steganography");
 }
+pub mod keepalive {
+    tonic::include_proto!("keep_alive"); // This should match your proto path
+}
 
 pub static CURRENT_LEADER_ID: AtomicU64 = AtomicU64::new(0);
 pub static PERSONAL_ID: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Debug, Default)]
+pub struct KeepAliveService {}
 
+
+#[tonic::async_trait]
+impl keep_alive::KeepAliveService for KeepAliveService {
+    type KeepAliveStream = tokio::sync::mpsc::Receiver<keep_alive::Pong>;
+
+    async fn keep_alive(
+        &self,
+        request: tonic::Request<tonic::Streaming<keep_alive::Ping>>,
+    ) -> Result<tonic::Response<Self::KeepAliveStream>, tonic::Status> {
+        println!("Started keep-alive stream");
+
+        let mut stream = request.into_inner();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<keep_alive::Pong>(100);
+
+        // Spawn a task to handle incoming pings and send pongs
+        tokio::spawn(async move {
+            loop {
+                match stream.message().await {
+                    Ok(Some(ping)) => {
+                        println!("Received ping: {}", ping.message);
+                        // Respond with a pong
+                        if let Err(_) = tx.send(keep_alive::Pong {
+                            message: "pong".to_string(),
+                        }).await {
+                            println!("Failed to send pong, client might have disconnected.");
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        // The client has closed the stream (disconnected)
+                        println!("Client disconnected");
+                        break;
+                    }
+                    Err(_) => {
+                        println!("Error receiving message from client");
+                        break;
+                    }
+                }
+
+                // Simulate a heartbeat check from the server
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            }
+        });
+
+        Ok(tonic::Response::new(rx))
+    }
+}
 
 
 
@@ -77,8 +130,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Create and start gRPC server
     let grpc_addr = "[::]:50051".parse::<SocketAddr>()?;
     let port_grabber_service = PortGrabberService::default();
+    let keep_alive_service = KeepAliveService::default();
     Server::builder()
         .add_service(PortGrabberServer::new(port_grabber_service))
+        .add_service(keep_alive::KeepAliveServiceServer::new(keep_alive_service))
         .serve(grpc_addr)
         .await?;
 
