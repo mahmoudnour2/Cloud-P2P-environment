@@ -613,16 +613,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             2 => {
                 let mut peer_id: Vec<String> = vec![];
                 let mut peer_ip: Vec<String> = vec![];
+                let mut temp_resources: String = "".to_string();
                 let mut peer_resources: Vec<String> = vec![];
                 match get_all_entries(&hub, filename).await {
                     Ok(entries) => {
                         for entry in entries {
                             peer_id.push(entry.Client_ID.clone());
-                            peer_ip.push(entry.Client_IP.clone());
-                            peer_resources.push(entry.resources.clone());
+                            peer_ip.push(format!("{}:9000", entry.Client_IP.clone()));
+                            temp_resources = entry.resources.clone();
                         }
                     }
                     Err(e) => eprintln!("Error retrieving entries: {}", e),
+                }
+
+                for resource in temp_resources.split(",") {
+                    peer_resources.push(resource.to_string());
                 }
 
 
