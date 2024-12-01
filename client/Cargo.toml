@@ -34,3 +34,12 @@ futures = "0.3.31"
 stegano-core = "0.5.3"
 minifb = "0.25"
 tempfile = "3.3.0"
+tonic = "*"
+prost = "0.13"
+async-stream = "0.2"
+rand = "0.8"
+mac_address = "1.1.7"
+local-ip-address = "0.6.3"
+
+[build-dependencies]
+tonic-build = "*"

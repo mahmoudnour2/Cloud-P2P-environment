@@ -9,9 +9,9 @@ use std::time::Duration;
 use std::panic::AssertUnwindSafe;
 
 mod transport;
-mod image_steganographer;
+mod image_steganographer_local;
 mod quinn_utils;
-use image_steganographer::{ImageSteganographer, SomeImageSteganographer};
+use image_steganographer_local::{ImageSteganographer, SomeImageSteganographer};
 use transport::{create, TransportEnds};
 use quinn_utils::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
@@ -25,9 +25,53 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
+use rand::Rng;
+use mac_address::get_mac_address;
+
+use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
+use std::net::IpAddr;
+use local_ip_address::local_ip;
+
+
+use port_grabber::port_grabber_client::PortGrabberClient;
+use port_grabber::PortRequest;
+use port_grabber::PortReply;
+
+
+
+use image_steganographer::encoder_client::EncoderClient;
+use image_steganographer::EncodeRequest;
+use image_steganographer::EncodeReply;
+
+mod dos;
+use dos::{add_dos_entry, delete_dos_entry, setup_drive_hub, get_all_entries};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct dos_heartbeat{
+    pub mac_address: String,
+    pub ip_address: String,
+    pub resources: String,
+}
+
+
+pub mod port_grabber {
+    tonic::include_proto!("port_grabber");
+}
+
+pub mod image_steganographer {
+    tonic::include_proto!("steganography");
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
+    let hub = setup_drive_hub().await?;
+    let filename = "DoS.tsv";
+    let drivename = "DoS";
+
+
+    
     
     // Add near the start of main
     std::fs::create_dir_all("encoded_images")
@@ -36,7 +80,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .map_err(|e| format!("Failed to create decoded_images directory: {}", e))?;
     // Setup Quinn endpoints
     let server_addrs: Vec<SocketAddr> = vec![
-        "10.7.17.170:5017".parse()?,
+        "10.7.19.117:50051".parse()?,
     ];  // Connect to server's ports
     let client_addr: SocketAddr = "10.7.19.179:0".parse()?;  // Listen on this port
 
@@ -187,6 +231,124 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut client_endpoint = quinn::Endpoint::client(client_addr)?;
     client_endpoint.set_default_client_config(client_config);
 
+    let directory_of_service_adds: Vec<SocketAddr> = vec![
+        "10.7.19.117:5020".parse()?,
+    ];
+
+    let (directory_of_servce_endpoint,_cert) = make_server_endpoint("[::1]:8000".parse()?).unwrap();
+
+    let directory_service = tokio::spawn(async move {
+        println!("Starting directory of service server...");
+        let mut client_endpoints = vec![];
+        for server_addr in directory_of_service_adds.clone() {
+            // println!("Setting up client endpoint for peer {}", peer_addr);
+            let mut client_endpoint = match Endpoint::client("0.0.0.0:0".parse().unwrap())
+            {
+                Ok(endpoint) => endpoint,
+                Err(e) => {
+                    println!("Error creating client endpoint: {}", e);
+                    return;
+                }
+            };
+            //println!("Client endpoint created for peer {}", peer_addr);
+            
+            let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+                rustls::ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(SkipServerVerification::new())
+                    .with_no_client_auth(),
+            ).map_err(|e| {
+                println!("Error creating client config: {}", e);
+                e
+            }).unwrap()));
+            
+            let mut transport_config = TransportConfig::default();
+            transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
+            client_config.transport_config(Arc::new(transport_config));
+            client_endpoint.set_default_client_config(client_config);
+            //println!("Client config set for peer {}", peer_addr);
+            client_endpoints.push((server_addr, client_endpoint));
+        }
+        loop{
+            //println!("Node {} broadcasting message", self.id);
+            let mut mac_address = String::new();
+            if let Ok(interfaces) = mac_address::get_mac_address() {
+                if let Some(mac) = interfaces {
+                    mac_address = mac.to_string();
+                }
+            }
+            let ip_address = local_ip().unwrap().to_string();
+            let mut resources = vec![];
+            let encoded_images_path = "encoded_images";
+            if let Ok(entries) = std::fs::read_dir(encoded_images_path) {
+                for entry in entries.filter_map(Result::ok) {
+                    if let Ok(file_name) = entry.file_name().into_string() {
+                        resources.push(file_name);
+                    }
+                }
+            }
+            let resources = resources.join(",");
+            let msg = dos_heartbeat{
+                mac_address: mac_address,
+                ip_address: ip_address,
+                resources: resources,
+            };
+            let msg_bytes = bincode::serialize(&msg).expect("Failed to serialize message");
+            let msg_bytes = &msg_bytes;
+            let mut tasks = vec![];
+            for (peer_addr, client_endpoint) in client_endpoints.clone() {
+                //println!("Sending message to peer {}", peer_addr);
+                let msg_bytes = msg_bytes.clone();
+                let client_endpoint = client_endpoint.clone();
+                let peer_addr = peer_addr;
+
+                let task = tokio::task::spawn(async move {
+                    //println!("Establishing connection to peer {}", peer_addr);
+                    
+                    let result: Result<(), anyhow::Error> = async {
+                        let conn = client_endpoint.connect(
+                            peer_addr,
+                            "localhost",
+                        )?
+                        .await?;
+                        //println!("[client] connected: addr={}", conn.remote_address());
+
+                        if let Ok((mut send, _recv)) = conn.open_bi().await {
+                            //println!("Sending message to {}", peer_addr);
+                            let _ = send.write_all(&msg_bytes).await; 
+                            //println!("wrote mesagge");
+                            let _ = send.finish();
+                            //println!("finished messages");
+                            sleep(Duration::from_millis(50)).await;
+                        }
+                        else{
+                            println!("Failed to open bi stream");
+                        }
+                        Ok(())
+                    }.await;
+
+                    //println!("Message sent to {}", peer_addr);
+
+                    if let Err(e) = result {
+                        println!("Error sending message to {}: {}", peer_addr, e);
+                    }
+                });
+
+                let random_timeout = Duration::from_millis(200 + rand::thread_rng().gen_range(0..100));
+                let task = tokio::time::timeout(random_timeout, task);
+                let task = async {
+                    match task.await {
+                        Ok(_) => (),
+                        Err(_) => (),
+                    }
+                };
+
+                tasks.push(task);
+            }
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    });
+
 
     println!("Quinn endpoints setup successfully.");
 
@@ -332,113 +494,98 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 let finale_path = finale_path.clone();
                                 let secret_file_name = secret_file_name.clone();
                                 let semaphore = semaphore.clone();
+
+                                let uri = format!("http://{}", addr);
+
+                                let mut client = PortGrabberClient::connect(uri)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+
+                                let request = tonic::Request::new(PortRequest { });
+                                let port_response = client.get_port(request).await
+                                                                    .map_err(|e| e.to_string())?;
+
+
+                                let uri = format!("http://{}",port_response.get_ref().port);
+                                println!("{}",uri);
+
+                                let mut client = EncoderClient::connect(uri)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+                                
+                                client = client
+                                    .max_encoding_message_size(50 * 1024 * 1024) // Set max encoding size to 10 MB
+                                    .max_decoding_message_size(50 * 1024 * 1024); // Set max decoding size to 10 MB
+                                
+                                println!("Encoding secret image {} on server {}...", index, addr);
                         
                                 let handle = tokio::spawn(async move {
                                     let permit = semaphore.acquire().await.unwrap(); // Acquire a permit
-                                    let ends = match timeout(Duration::from_secs(10), create(client_endpoint.clone(), addr)).await {
-                                        Ok(Ok(ends)) => ends,
-                                        Ok(Err(e)) => {
-                                            retries += 1;
-                                            backoff_duration *= 2;
-                                            println!("Error creating transport ends: {}", e);
+                                    
+                                    
+                                    let owner_id = match get_mac_address() {
+                                        Ok(Some(mac)) => mac.to_string(),
+                                        Ok(None) => {
+                                            println!("No MAC address found");
                                             return;
                                         }
-                                        Err(_) => {
-                                            retries += 1;
-                                            backoff_duration *= 2;
-                                            println!("Timeout occurred while creating transport ends");
+                                        Err(e) => {
+                                            println!("Failed to get MAC address: {:?}", e);
                                             return;
                                         }
                                     };
-                                    
-                                    let (context_user, image_steganographer): (Context, ServiceToImport<dyn ImageSteganographer>) =
-                                        Context::with_initial_service_import(Config::default_setup(), ends.send.clone(), ends.recv.clone());
-                                    context_user.disable_garbage_collection();
-                                    let image_steganographer_proxy: Box<dyn ImageSteganographer> = image_steganographer.into_proxy();
-                                    println!("Encoding secret image {} with proxy", index);
-                                    let stegano = timeout(Duration::from_secs(60), async {
-                                        match std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                            let owner_id = "owner123";
-                                            let requester_id = "requester456";
-                                            let initial_access_rights = 3;
 
-                                            // First encode the secret image remotely
-                                            let encoded_image = image_steganographer_proxy.encode(
-                                                &secret_image_bytes,
-                                                &stego_path,
-                                                &secret_file_name,
-                                                &owner_id,
-                                            )?;
+                                    let request = EncodeRequest {
+                                        image: secret_image_bytes.clone(),
+                                        output_path: stego_path.clone(),
+                                        file_name: secret_file_name.clone(),
+                                        owner_id: owner_id,
+                                    };
 
-
-                                            // Then add access rights locally
-                                            // let local_steganographer = SomeImageSteganographer::new(100, 10);
-                                            // let final_encoded = local_steganographer.encode_with_access_rights(
-                                            //     &encoded_image,
-                                            //     owner_id,
-                                            //     requester_id,
-                                            //     initial_access_rights,
-                                            //     &stego_with_rights_path
-                                            // )?;
-
-                                            Ok(encoded_image)
-                                        })) {
-                                            Ok(Ok(result)) => Ok(result),
-                                            Ok(Err(e)) => Err(e),
-                                            Err(_) => Err(Box::new(std::io::Error::new(
-                                                std::io::ErrorKind::Other,
-                                                "Task panicked"
-                                            )) as Box<dyn std::error::Error>)
-                                        }
-                                    }).await.unwrap_or_else(|_| Err(Box::new(std::io::Error::new(
-                                        std::io::ErrorKind::TimedOut,
-                                        "Timeout occurred during encoding"
-                                    )) as Box<dyn std::error::Error>));
-                                    
-                                    // Handle the result
-                                    match stegano {
-                                        Ok(final_encoded) => {
+                                    match client.encode(request).await {
+                                        Ok(res) => {
                                             println!("Encoding completed successfully");
                                             let secret_file_name = format!("{}.png", secret_file_name.rsplit('.').nth(1).unwrap_or(&secret_file_name));
                                             let encoded_image_path = format!("encoded_images/{}", secret_file_name);
-                                            if let Err(e) = std::fs::write(&encoded_image_path, &final_encoded) {
+                                            if let Err(e) = std::fs::write(&encoded_image_path, &res.get_ref().image) {
                                                 println!("Failed to save encoded image: {}", e);
                                             }
                                             println!("Encoded image saved to {}", encoded_image_path);
                                             let stego_with_rights_path = stego_with_rights_path.clone();
                                             let local_steganographer = SomeImageSteganographer::new(100, 10);
-
-                                            // if let Err(e) = local_steganographer.view_decoded_image_temp(
-                                            //     &final_encoded,
-                                            //     "requester456",
-                                            //     &stego_with_rights_path
-                                                
-                                            // ) {
-                                            //     println!("Error viewing decoded image: {}", e);
-                                            // }
-                                        },
-                                    Err(e) => {
-                                        retries += 1;
-                                            backoff_duration *= 2;
-                                            println!("Failed to encode: {:?}", e);
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            println!("Error encoding on server {}: {}. Retrying... ({}/{})", addr, e, retries + 1, max_retries);
+                                            return;
                                         }
                                     }
+                                    
+                                    
                                     drop(permit); // Release the permit
                                 });
                                 handles.push(handle);
                             }
                     
                             let results: Vec<_> = futures::future::join_all(handles).await;
+                            let mut all_failed = true;
                             for result in results {
                                 match result {
                                     Ok(_) => {
                                         println!("Secret image {} processed successfully", index);
                                         success = true;
+                                        all_failed = false;
                                     },
                                     Err(e) => {
                                         println!("Error in task: {}", e);
                                     }
                                 }
+                            }
+                            if all_failed {
+                                retries += 1;
+                                backoff_duration *= 2;
+                                println!("Retrying... ({}/{})", retries, max_retries);
+                                tokio::time::sleep(backoff_duration).await;
                             }
                         }
                         
@@ -464,16 +611,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             },
             2 => {
-                let peer_list = vec![
-                    "10.7.16.29:9000"
-                ];
-                let resource_list = vec![
-                    "d.png",
-                    "e.png",
-                    "f.png",
-                ];
+                let mut peer_id: Vec<String> = vec![];
+                let mut peer_ip: Vec<String> = vec![];
+                let mut peer_resources: Vec<String> = vec![];
+                match get_all_entries(&hub, filename).await {
+                    Ok(entries) => {
+                        for entry in entries {
+                            peer_id.push(entry.Client_ID.clone());
+                            peer_ip.push(entry.Client_IP.clone());
+                            peer_resources.push(entry.resources.clone());
+                        }
+                    }
+                    Err(e) => eprintln!("Error retrieving entries: {}", e),
+                }
+
+
+
                 println!("Available peers:");
-                for (i, peer) in peer_list.iter().enumerate() {
+                for (i, peer) in peer_id.iter().enumerate() {
                     println!("{}. {}", i + 1, peer);
                 }
 
@@ -482,7 +637,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 std::io::stdin().read_line(&mut peer_choice)?;
                 let peer_choice: usize = loop {
                     match peer_choice.trim().parse() {
-                        Ok(num) if num > 0 && num <= peer_list.len() => break num,
+                        Ok(num) if num > 0 && num <= peer_id.len() => break num,
                         _ => {
                             println!("Invalid choice. Please enter a valid number:");
                             peer_choice.clear();
@@ -491,10 +646,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 };
 
-                let selected_peer = &peer_list[peer_choice - 1];
+                let selected_peer = &&peer_ip[peer_choice - 1];
 
                 println!("Available resources:");
-                for (i, resource) in resource_list.iter().enumerate() {
+                for (i, resource) in peer_resources.iter().enumerate() {
                     println!("{}. {}", i + 1, resource);
                 }
                 println!("Enter the number of the resource you want to request:");
@@ -502,7 +657,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 std::io::stdin().read_line(&mut resource_choice)?;
                 let resource_choice: usize = loop {
                     match resource_choice.trim().parse() {
-                        Ok(num) if num > 0 && num <= resource_list.len() => break num,
+                        Ok(num) if num > 0 && num <= peer_resources.len() => break num,
                         _ => {
                             println!("Invalid choice. Please enter a valid number:");
                             resource_choice.clear();
@@ -511,7 +666,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 };
 
-                let selected_resource = &resource_list[resource_choice - 1];
+                let selected_resource = &peer_resources[resource_choice - 1];
 
                 println!("Enter the number of times you want to access the resource:");
                 let mut num_accesses = String::new();
