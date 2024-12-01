@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package keepalive;
+
+service KeepAliveService {
+    rpc KeepAlive (stream Ping) returns (stream Pong);
+}
+
+message Ping {
+    string message = 1;  // Custom message (could be a timestamp or "ping")
+}
+
+message Pong {
+    string message = 1;  // Response message (could be "pong")
+}
