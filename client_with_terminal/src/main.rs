@@ -124,11 +124,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             println!("4. Exit");
                                                             } 
                                                             else {
-                                                            println!("User denied the connection.");
                                                             // Handle the denied connection here
                                                             if !output.status.success() {
                                                                 println!("User denied the connection.");
-                                                                let response = "Request not granted. I will not give you the image.";
+                                                                let response = "Response: Request not granted. I will not give you the image.";
                                                                 if let Err(e) = send.write_all(response.as_bytes()).await {
                                                                     println!("Failed to send denial message: {:?}", e);
                                                                 }
@@ -234,52 +233,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}. {}", index + 1, path.display());
                 }
 
-                let selected_indices = loop {
-                    println!("Enter the indices of the images you want to encode (e.g., 1,5-9,12):");
-                    let mut indices_input = String::new();
-                    std::io::stdin().read_line(&mut indices_input)?;
-                    let indices_input = indices_input.trim();
+                println!("Enter the indices of the images you want to encode (e.g., 1,5-9,12):");
+                let mut indices_input = String::new();
+                std::io::stdin().read_line(&mut indices_input)?;
+                let indices_input = indices_input.trim();
 
-                    let mut selected_indices = Vec::new();
-                    let mut valid_input = true;
-
-                    for part in indices_input.split(',') {
-                        if part.contains('-') {
-                            let range_parts: Vec<&str> = part.split('-').collect();
-                            if range_parts.len() == 2 {
-                                let start = range_parts[0].parse::<usize>();
-                                let end = range_parts[1].parse::<usize>();
-                                match (start, end) {
-                                    (Ok(start), Ok(end)) if start <= end && end <= secret_images.len() => {
-                                        selected_indices.extend(start..=end);
-                                    }
-                                    _ => {
-                                        println!("Invalid range: {}", part);
-                                        valid_input = false;
-                                        break;
-                                    }
-                                }
+                let mut selected_indices = Vec::new();
+                for part in indices_input.split(',') {
+                    if part.contains('-') {
+                        let range_parts: Vec<&str> = part.split('-').collect();
+                        if range_parts.len() == 2 {
+                            let start = range_parts[0].parse::<usize>().map_err(|e| format!("Invalid range start: {}", e))?;
+                            let end = range_parts[1].parse::<usize>().map_err(|e| format!("Invalid range end: {}", e))?;
+                            if start <= end && end <= secret_images.len() {
+                                selected_indices.extend(start..=end);
                             } else {
-                                println!("Invalid range format: {}", part);
-                                valid_input = false;
-                                break;
+                                return Err(format!("Invalid range: {}", part).into());
                             }
                         } else {
-                            match part.parse::<usize>() {
-                                Ok(index) if index <= secret_images.len() => selected_indices.push(index),
-                                _ => {
-                                    println!("Invalid index: {}", part);
-                                    valid_input = false;
-                                    break;
-                                }
-                            }
+                            return Err(format!("Invalid range format: {}", part).into());
+                        }
+                    } else {
+                        let index = part.parse::<usize>().map_err(|e| format!("Invalid index: {}", e))?;
+                        if index <= secret_images.len() {
+                            selected_indices.push(index);
+                        } else {
+                            return Err(format!("Index out of bounds: {}", index).into());
                         }
                     }
-
-                    if valid_input {
-                        break selected_indices;
-                    }
-                };
+                }
 
                 let selected_images: Vec<_> = selected_indices.iter().map(|&i| secret_images[i - 1].clone()).collect();
                 println!("Selected images:");
@@ -483,12 +465,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
             2 => {
                 let peer_list = vec![
-                    "10.7.19.179:9100"
+                    "10.7.16.29:9000"
                 ];
                 let resource_list = vec![
-                    "a.png",
-                    "b.png",
-                    "c.png",
+                    "d.png",
+                    "e.png",
+                    "f.png",
                 ];
                 println!("Available peers:");
                 for (i, peer) in peer_list.iter().enumerate() {
@@ -568,7 +550,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(response_bytes) => {
                         // Check if the response is an actual image or an error message
                         if let Ok(response) = String::from_utf8(response_bytes.clone()) {
-                            if response == "Request not granted. I will not give you the image." {
+                            if response == "Response: Request not granted. I will not give you the image." {
                                 println!("{}", response);
                             } else {
                                 // Write the received bytes directly to a file

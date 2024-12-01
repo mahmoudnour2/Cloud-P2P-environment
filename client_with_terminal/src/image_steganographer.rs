@@ -318,6 +318,7 @@ impl ImageSteganographer for SomeImageSteganographer {
         temp_decoded_path = format!("{}.jpg", temp_decoded_path);
 
         println!("Opening decoded image: {}", temp_decoded_path);
+        println!("\nRemaining access rights: {}", metadata.access_rights);
         let decoded_image = image::open(&temp_decoded_path)
             .map_err(|e| format!("Failed to open decoded image: {}", e))?;
         let mut buffer = Vec::new();
